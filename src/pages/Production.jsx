@@ -20,12 +20,10 @@ export default function Production() {
     const [purchaseLines, setPurchaseLines] = useState([]); // { purchase_header_id, raw_item_id }[]
 
     const [batchNo, setBatchNo] = useState('');
-    const [fgItemId, setFgItemId] = useState('');
-    const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-    const [mfd, setMfd] = useState(format(new Date(), 'yyyy-MM-dd'));
-    const [exp, setExp] = useState(format(new Date(new Date().setFullYear(new Date().getFullYear() + 1)), 'yyyy-MM-dd'));
-    const [qtyPerPacket, setQtyPerPacket] = useState('');
-    const [totalQty, setTotalQty] = useState('');
+    const [date, setDate] = useState('');
+    const [mfd, setMfd] = useState('');
+    const [exp, setExp] = useState('');
+    const [prodLines, setProdLines] = useState([]);
     const [consumptions, setConsumptions] = useState([]);
 
     useEffect(() => {
@@ -37,7 +35,7 @@ export default function Production() {
         setLoading(true);
         const { data: records, error } = await supabase
             .from('production_headers')
-            .select('*, fg_items(name), production_consumptions(*, raw_items(name), purchase_headers(purchase_no))')
+            .select('*, production_lines(*, fg_items(*)), production_consumptions(*, raw_items(name), purchase_headers(purchase_no))')
             .order('created_at', { ascending: false });
         if (error) toast.error('Error fetching production: ' + error.message);
         else setData(records);
@@ -56,15 +54,20 @@ export default function Production() {
     };
 
     // ── OPEN CREATE ────────────────────────────────────────────────────────────
+    // Format gram value → "25g", "500g", "1kg" etc.
+    const formatPacketSize = (val) => {
+        const g = Number(val);
+        if (!g) return val;
+        return g >= 1000 ? `${g / 1000}kg` : `${g}g`;
+    };
+
     const openCreateModal = () => {
         setEditingId(null);
         setBatchNo('BATCH-' + Math.floor(1000 + Math.random() * 9000));
-        setFgItemId('');
         setDate(format(new Date(), 'yyyy-MM-dd'));
         setMfd(format(new Date(), 'yyyy-MM-dd'));
         setExp(format(new Date(new Date().setFullYear(new Date().getFullYear() + 1)), 'yyyy-MM-dd'));
-        setQtyPerPacket('');
-        setTotalQty('');
+        setProdLines([]);
         setConsumptions([]);
         setIsModalOpen(true);
     };
@@ -73,12 +76,15 @@ export default function Production() {
     const openEditModal = (row) => {
         setEditingId(row.id);
         setBatchNo(row.batch_no);
-        setFgItemId(row.fg_item_id);
         setDate(row.date);
         setMfd(row.mfd);
         setExp(row.exp);
-        setQtyPerPacket(row.qty_per_packet);
-        setTotalQty(row.total_qty);
+        setProdLines((row.production_lines || []).map(pl => ({
+            id: pl.id,
+            fg_item_id: pl.fg_item_id,
+            qty_per_packet: pl.qty_per_packet,
+            total_qty: pl.total_qty
+        })));
         setConsumptions((row.production_consumptions || []).map(c => ({
             id: c.id,
             purchase_no: c.purchase_no,
@@ -141,16 +147,42 @@ export default function Production() {
         setConsumptions(consumptions.filter(c => c.id !== id));
     };
 
+    // ── FG LINES LOGIC ─────────────────────────────────────────────────────────
+    const addProdLine = () => {
+        setProdLines([...prodLines, { id: Date.now(), fg_item_id: '', qty_per_packet: '', total_qty: '' }]);
+    };
+
+    const updateProdLine = (id, field, value) => {
+        setProdLines(prodLines.map(pl => pl.id === id ? { ...pl, [field]: value } : pl));
+    };
+
+    const removeProdLine = (id) => {
+        setProdLines(prodLines.filter(pl => pl.id !== id));
+    };
+
     // ── SUBMIT (CREATE or UPDATE) ──────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (prodLines.length === 0) return toast.error('Add at least one Finished Good line');
         if (consumptions.length === 0) return toast.error('Add at least one raw material to consume');
+
+        for (const pl of prodLines) {
+            if (!pl.fg_item_id || pl.qty_per_packet <= 0 || pl.total_qty <= 0) {
+                return toast.error('Please fill all Finished Good columns correctly');
+            }
+        }
 
         for (const c of consumptions) {
             if (!c.purchase_no || !c.raw_item_id || c.qty <= 0) {
                 return toast.error('Please fill all consumption lines correctly');
             }
         }
+
+        const prodLinesPayload = prodLines.map(pl => ({
+            fg_item_id: pl.fg_item_id,
+            qty_per_packet: Number(pl.qty_per_packet),
+            total_qty: Number(pl.total_qty)
+        }));
 
         const consumptionPayload = consumptions.map(c => ({
             purchase_no: c.purchase_no,
@@ -161,10 +193,8 @@ export default function Production() {
         if (editingId) {
             const payload = {
                 header_id: editingId,
-                fg_item_id: fgItemId,
                 date, mfd, exp,
-                qty_per_packet: Number(qtyPerPacket),
-                total_qty: Number(totalQty),
+                prod_lines: prodLinesPayload,
                 consumptions: consumptionPayload
             };
             const { error } = await supabase.rpc('update_production', { payload });
@@ -178,10 +208,8 @@ export default function Production() {
         } else {
             const payload = {
                 batch_no: batchNo,
-                fg_item_id: fgItemId,
                 date, mfd, exp,
-                qty_per_packet: Number(qtyPerPacket),
-                total_qty: Number(totalQty),
+                prod_lines: prodLinesPayload,
                 consumptions: consumptionPayload
             };
             const { error } = await supabase.rpc('post_production', { payload });
@@ -210,7 +238,7 @@ export default function Production() {
 
     const filteredData = data.filter(item =>
         item.batch_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.fg_items?.name.toLowerCase().includes(searchTerm.toLowerCase())
+        item.production_lines?.some(pl => pl.fg_items?.name.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     return (
@@ -246,11 +274,9 @@ export default function Production() {
                             <tr>
                                 <th>Date</th>
                                 <th>Batch No</th>
-                                <th>Product</th>
+                                <th>Products Produced</th>
                                 <th>MFD</th>
                                 <th>EXP</th>
-                                <th>Qty / Packet</th>
-                                <th>Packets</th>
                                 <th style={{ textAlign: 'center' }}>Actions</th>
                             </tr>
                         </thead>
@@ -266,11 +292,17 @@ export default function Production() {
                                             {row.batch_no}
                                         </button>
                                     </td>
-                                    <td>{row.fg_items?.name}</td>
+                                    <td>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                            {(row.production_lines || []).map((pl, i) => (
+                                                <span key={pl.id} style={{ fontSize: '0.85rem' }}>
+                                                    • {pl.fg_items?.name}: {pl.total_qty} pkts ({formatPacketSize(pl.qty_per_packet)})
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </td>
                                     <td>{row.mfd ? format(new Date(row.mfd), 'MMM dd, yyyy') : '—'}</td>
                                     <td>{row.exp ? format(new Date(row.exp), 'MMM dd, yyyy') : '—'}</td>
-                                    <td>{row.qty_per_packet}</td>
-                                    <td>{row.total_qty}</td>
                                     <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                                         <button
                                             className="btn-icon"
@@ -309,8 +341,7 @@ export default function Production() {
                         </div>
 
                         <form onSubmit={handleSubmit} className="modal-form">
-                            <h4>Finished Good Details</h4>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
                                 <div className="form-group">
                                     <label>Batch No</label>
                                     <input
@@ -323,19 +354,8 @@ export default function Production() {
                                     />
                                 </div>
                                 <div className="form-group">
-                                    <label>Finished Good Item</label>
-                                    <select value={fgItemId} onChange={e => setFgItemId(e.target.value)} required>
-                                        <option value="">Select FG</option>
-                                        {fgItems.map(f => <option key={f.id} value={f.id}>{f.name} ({f.uom})</option>)}
-                                    </select>
-                                </div>
-                                <div className="form-group">
                                     <label>Date</label>
                                     <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
-                                </div>
-                                <div className="form-group">
-                                    <label>Total Packet Produced</label>
-                                    <input type="number" min="1" step="0.01" value={totalQty} onChange={e => setTotalQty(e.target.value)} required />
                                 </div>
                                 <div className="form-group">
                                     <label>MFD Date</label>
@@ -345,11 +365,52 @@ export default function Production() {
                                     <label>EXP Date</label>
                                     <input type="date" value={exp} onChange={e => setExp(e.target.value)} required />
                                 </div>
-                                <div className="form-group">
-                                    <label>Qty Per Packet (Grams/KG)</label>
-                                    <input type="number" min="0" step="0.01" value={qtyPerPacket} onChange={e => setQtyPerPacket(e.target.value)} required />
-                                </div>
                             </div>
+
+                            {/* ── FG LINES ── */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', marginTop: '2rem' }}>
+                                <h4>Finished Goods Produced</h4>
+                                <button type="button" className="btn-secondary" onClick={addProdLine}><Plus size={16} /> Add Product</button>
+                            </div>
+
+                            <table className="data-table" style={{ marginBottom: '2rem' }}>
+                                <thead>
+                                    <tr>
+                                        <th>Finished Good Item</th>
+                                        <th>Qty Per Packet (Grams/KG)</th>
+                                        <th>Total Packets Produced</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {prodLines.map(line => (
+                                        <tr key={line.id}>
+                                            <td>
+                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.fg_item_id} onChange={e => updateProdLine(line.id, 'fg_item_id', e.target.value)} required>
+                                                    <option value="">Select FG</option>
+                                                    {fgItems.map(f => <option key={f.id} value={f.id}>{f.name} ({f.uom})</option>)}
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.qty_per_packet} onChange={e => updateProdLine(line.id, 'qty_per_packet', e.target.value)} required>
+                                                    <option value="">Select Size</option>
+                                                    <option value="25">25g</option>
+                                                    <option value="50">50g</option>
+                                                    <option value="100">100g</option>
+                                                    <option value="250">250g</option>
+                                                    <option value="500">500g</option>
+                                                    <option value="1000">1kg</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input className="form-group" style={{ marginBottom: 0 }} type="number" min="1" step="0.01" value={line.total_qty} onChange={e => updateProdLine(line.id, 'total_qty', e.target.value)} required />
+                                            </td>
+                                            <td><button type="button" className="btn-icon" onClick={() => removeProdLine(line.id)}><Trash2 size={16} /></button></td>
+                                        </tr>
+                                    ))}
+                                    {prodLines.length === 0 && <tr><td colSpan="4" className="text-muted" style={{ textAlign: 'center' }}>No products added</td></tr>}
+                                </tbody>
+                            </table>
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', marginTop: '2rem' }}>
                                 <h4>Raw Materials Consumed</h4>
@@ -456,14 +517,32 @@ export default function Production() {
                             <div>
                                 <h3>{viewTarget.batch_no}</h3>
                                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                                    {viewTarget.fg_items?.name}&nbsp;|&nbsp;
-                                    {format(new Date(viewTarget.date), 'MMM dd, yyyy')}&nbsp;|&nbsp;
-                                    {viewTarget.total_qty} Packets
+                                    {format(new Date(viewTarget.date), 'MMM dd, yyyy')}
                                 </p>
                             </div>
                             <button className="btn-icon" onClick={() => setViewTarget(null)}><X size={20} /></button>
                         </div>
                         <div className="modal-form">
+                            <h4 style={{ marginBottom: '0.75rem' }}>Finished Goods Produced</h4>
+                            <table className="data-table" style={{ marginBottom: '2rem' }}>
+                                <thead>
+                                    <tr>
+                                        <th>Product</th>
+                                        <th>Qty / Packet</th>
+                                        <th>Packets</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(viewTarget.production_lines || []).map((pl) => (
+                                        <tr key={pl.id}>
+                                            <td><strong>{pl.fg_items?.name}</strong></td>
+                                            <td>{formatPacketSize(pl.qty_per_packet)}</td>
+                                            <td>{pl.total_qty} pkts</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+
                             <h4 style={{ marginBottom: '0.75rem' }}>Raw Materials Consumed</h4>
                             <table className="data-table" style={{ marginBottom: '1rem' }}>
                                 <thead>
