@@ -26,7 +26,11 @@ export default function Sidebar({ isOpen, onClose }) {
 
             <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}`}>
                 <div className="sidebar-header">
-                    <h2>Amrona</h2>
+                    <img
+                        src="/src/assests/logo.png.png"
+                        alt="Amrona Logo"
+                        style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
+                    />
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span className="badge">{role}</span>
                         {/* Close button — visible on mobile only */}

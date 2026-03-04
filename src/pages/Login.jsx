@@ -45,6 +45,11 @@ export default function Login() {
         <div className="login-container">
             <div className="login-card">
                 <div className="login-header">
+                    <img
+                        src="/src/assests/logo.png.png"
+                        alt="Amrona Logo"
+                        style={{ height: '100px', width: 'auto', objectFit: 'contain', marginBottom: '0.5rem' }}
+                    />
                     <h2>Amrona Inventory</h2>
                     <p>Login to access the system</p>
                 </div>
