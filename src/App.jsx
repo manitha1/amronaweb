@@ -10,6 +10,8 @@ import MasterDataPage from './pages/MasterDataPage';
 import Purchasing from './pages/Purchasing';
 import Production from './pages/Production';
 import Sales from './pages/Sales';
+import RawStockReport from './pages/RawStockReport';
+import FgStockReport from './pages/FgStockReport';
 
 const itemColumns = [
     { key: 'code', label: 'Item Code' },
@@ -60,6 +62,8 @@ function App() {
                             <Route path="purchasing" element={<Purchasing />} />
                             <Route path="production" element={<Production />} />
                             <Route path="sales" element={<Sales />} />
+                            <Route path="raw-stock" element={<RawStockReport />} />
+                            <Route path="fg-stock" element={<FgStockReport />} />
                         </Route>
 
                         <Route path="*" element={<Navigate to="/" replace />} />

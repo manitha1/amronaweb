@@ -17,6 +17,7 @@ export default function Production() {
     const [fgItems, setFgItems] = useState([]);
     const [purchases, setPurchases] = useState([]);
     const [rawItems, setRawItems] = useState([]);
+    const [purchaseLines, setPurchaseLines] = useState([]); // { purchase_header_id, raw_item_id }[]
 
     const [batchNo, setBatchNo] = useState('');
     const [fgItemId, setFgItemId] = useState('');
@@ -47,9 +48,11 @@ export default function Production() {
         const { data: f } = await supabase.from('fg_items').select('id, name, uom');
         const { data: p } = await supabase.from('purchase_headers').select('id, purchase_no');
         const { data: r } = await supabase.from('raw_items').select('id, name, uom');
+        const { data: pl } = await supabase.from('purchase_lines').select('purchase_header_id, raw_item_id');
         if (f) setFgItems(f);
         if (p) setPurchases(p);
         if (r) setRawItems(r);
+        if (pl) setPurchaseLines(pl);
     };
 
     // ── OPEN CREATE ────────────────────────────────────────────────────────────
@@ -97,7 +100,9 @@ export default function Production() {
     };
 
     const updateConsumption = async (id, field, value) => {
-        const updated = consumptions.map(c => c.id === id ? { ...c, [field]: value } : c);
+        // When purchase changes, reset raw_item_id and remainingQty to avoid stale selection
+        const extra = field === 'purchase_no' ? { raw_item_id: '', remainingQty: null } : {};
+        const updated = consumptions.map(c => c.id === id ? { ...c, [field]: value, ...extra } : c);
         setConsumptions(updated);
 
         const line = updated.find(c => c.id === id);
@@ -370,14 +375,25 @@ export default function Production() {
                                                 </select>
                                             </td>
                                             <td>
-                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.raw_item_id} onChange={e => updateConsumption(line.id, 'raw_item_id', e.target.value)} required>
-                                                    <option value="">Select Item</option>
-                                                    {rawItems.map(r => <option key={r.id} value={r.id}>{r.name} ({r.uom})</option>)}
+                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.raw_item_id} onChange={e => updateConsumption(line.id, 'raw_item_id', e.target.value)} required disabled={!line.purchase_no}>
+                                                    <option value="">{line.purchase_no ? 'Select Item' : 'Select Purchase first'}</option>
+                                                    {rawItems
+                                                        .filter(r =>
+                                                            !line.purchase_no ||
+                                                            purchaseLines.some(pl => pl.purchase_header_id === line.purchase_no && pl.raw_item_id === r.id)
+                                                        )
+                                                        .map(r => <option key={r.id} value={r.id}>{r.name} ({r.uom})</option>)
+                                                    }
                                                 </select>
                                             </td>
                                             <td>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                    <input className="form-group" style={{ marginBottom: 0, width: '100px' }} type="number" min="0.01" step="0.01" value={line.qty} onChange={e => updateConsumption(line.id, 'qty', e.target.value)} required />
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <input className="form-group" style={{ marginBottom: 0, width: '100px' }} type="number" min="0.01" step="0.01" value={line.qty} onChange={e => updateConsumption(line.id, 'qty', e.target.value)} required />
+                                                        <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                                            {rawItems.find(r => r.id === line.raw_item_id)?.uom || 'Kg'}
+                                                        </span>
+                                                    </div>
                                                     {line.remainingQty !== null && line.remainingQty !== undefined && (
                                                         <span style={{
                                                             fontSize: '0.75rem', fontWeight: 600,

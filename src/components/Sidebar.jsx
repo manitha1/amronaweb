@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, Users, Truck, Factory, LogOut, PackageSearch, X } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Truck, Factory, LogOut, PackageSearch, X, BarChart2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -41,6 +41,12 @@ export default function Sidebar({ isOpen, onClose }) {
                         <p className="nav-label">General</p>
                         <NavLink to="/" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
                             <LayoutDashboard size={20} /> Dashboard
+                        </NavLink>
+                        <NavLink to="/raw-stock" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                            <Package size={20} /> Raw Stock
+                        </NavLink>
+                        <NavLink to="/fg-stock" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                            <PackageSearch size={20} /> FG Stock
                         </NavLink>
                     </div>
 
