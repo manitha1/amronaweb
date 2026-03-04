@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Package, ShoppingCart, Users, Truck, Factory, LogOut, PackageSearch, X, BarChart2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import amronaLogo from '../assests/logo.png';
 
 export default function Sidebar({ isOpen, onClose }) {
     const { signOut, role } = useAuth();
@@ -27,7 +28,7 @@ export default function Sidebar({ isOpen, onClose }) {
             <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}`}>
                 <div className="sidebar-header">
                     <img
-                        src="/src/assests/logo.png.png"
+                        src={amronaLogo}
                         alt="Amrona Logo"
                         style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
                     />

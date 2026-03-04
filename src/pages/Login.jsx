@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
+import amronaLogo from '../assests/logo.png';
 
 export default function Login() {
     const navigate = useNavigate();
@@ -44,7 +45,7 @@ export default function Login() {
             {/* ── LEFT BRAND PANEL ── */}
             <div className="login-left">
                 <div className="login-brand">
-                    <img src="/src/assests/logo.png.png" alt="Amrona Logo" />
+                    <img src={amronaLogo} alt="Amrona Logo" />
                     <h1>Amrona Inventory</h1>
                     <p>
                         Smart spice manufacturing &amp; inventory management for your growing business.
