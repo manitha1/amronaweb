@@ -12,18 +12,18 @@ import Production from './pages/Production';
 import Sales from './pages/Sales';
 
 const itemColumns = [
+    { key: 'code', label: 'Item Code' },
     { key: 'name', label: 'Item Name' },
-    { key: 'type', label: 'Category / Type' },
     { key: 'uom', label: 'UOM / Unit' }
 ];
 
 const itemFields = [
     { name: 'name', label: 'Item Name', required: true },
-    { name: 'type', label: 'Category / Type' },
-    { name: 'uom', label: 'UOM / Unit', required: true }
+    { name: 'uom', label: 'UOM / Unit', required: true, type: 'select', options: ['Kg', 'g'] }
 ];
 
 const contactColumns = [
+    { key: 'code', label: 'Code' },
     { key: 'name', label: 'Company / Name' },
     { key: 'contact_person', label: 'Contact Person' },
     { key: 'phone', label: 'Phone' },
@@ -52,10 +52,10 @@ function App() {
                         <Route path="/" element={<Layout />}>
                             <Route index element={<Dashboard />} />
 
-                            <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={itemColumns} formFields={itemFields} />} />
-                            <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={itemColumns} formFields={itemFields} />} />
-                            <Route path="suppliers" element={<MasterDataPage title="Suppliers" tableName="suppliers" columns={contactColumns} formFields={contactFields} />} />
-                            <Route path="customers" element={<MasterDataPage title="Customers" tableName="customers" columns={contactColumns} formFields={contactFields} />} />
+                            <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={itemColumns} formFields={itemFields} codeRange={{ min: 1000, max: 1999 }} />} />
+                            <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={itemColumns} formFields={itemFields} codeRange={{ min: 2000, max: 2999 }} />} />
+                            <Route path="suppliers" element={<MasterDataPage title="Suppliers" tableName="suppliers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 3000, max: 4000 }} />} />
+                            <Route path="customers" element={<MasterDataPage title="Customers" tableName="customers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 4001, max: 5000 }} />} />
 
                             <Route path="purchasing" element={<Purchasing />} />
                             <Route path="production" element={<Production />} />

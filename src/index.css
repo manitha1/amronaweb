@@ -481,3 +481,195 @@ h6 {
   border-radius: 4px;
   cursor: pointer;
 }
+
+/* ============================================
+   HAMBURGER BUTTON (visible on mobile only)
+   ============================================ */
+.hamburger-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius);
+  align-items: center;
+  justify-content: center;
+}
+
+.hamburger-btn:hover {
+  background-color: var(--bg-color);
+}
+
+/* Sidebar overlay / backdrop (mobile only) */
+.sidebar-overlay {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 199;
+}
+
+/* Sidebar close button — hidden on desktop */
+.sidebar-close-btn {
+  display: none !important;
+}
+
+/* Loading state for table */
+.loading-state {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* Table controls spacing */
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* ============================================
+   TABLET — max-width: 1024px
+   ============================================ */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 220px;
+  }
+}
+
+/* ============================================
+   MOBILE — max-width: 768px
+   ============================================ */
+@media (max-width: 768px) {
+
+  /* Hamburger visible */
+  .hamburger-btn {
+    display: flex;
+  }
+
+  /* Sidebar becomes a fixed left-drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 260px;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Show close button inside sidebar on mobile */
+  .sidebar-close-btn {
+    display: flex !important;
+  }
+
+  /* Main content takes full width */
+  .main-content {
+    width: 100%;
+  }
+
+  /* Top header: show hamburger on left, user-info on right */
+  .top-header {
+    justify-content: space-between;
+    padding: 0 1rem;
+    gap: 0.5rem;
+  }
+
+  /* Reduce content padding */
+  .content-wrapper {
+    padding: 1rem;
+  }
+
+  /* Stack page header row vertically */
+  .page-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  /* Search box: full width */
+  .search-box {
+    width: 100%;
+  }
+
+  /* Table controls: stack & full width */
+  .table-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Tables: horizontal scroll */
+  .table-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Slightly reduce table cell padding on mobile */
+  .data-table th,
+  .data-table td {
+    padding: 0.65rem 0.75rem;
+    white-space: nowrap;
+  }
+
+  /* Dashboard cards: smaller min for phones */
+  .dashboard-cards {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+
+  /* Modals: nearly full-screen */
+  .modal-content {
+    width: 95%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-form {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  /* Login card: smaller horizontal padding */
+  .login-card {
+    padding: 1.5rem 1rem;
+  }
+
+  /* Stat cards: stack icon + text better on small screens */
+  .stat-card {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+}
+
+/* ============================================
+   SMALL PHONES — max-width: 400px
+   ============================================ */
+@media (max-width: 400px) {
+  .dashboard-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .login-card {
+    padding: 1rem;
+    margin: 0 0.5rem;
+  }
+
+  .modal-content {
+    width: 100%;
+    border-radius: 0;
+    max-height: 100vh;
+  }
+}

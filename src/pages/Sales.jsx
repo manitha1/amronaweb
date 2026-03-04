@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
-import { Plus, Search, X, Trash2 } from 'lucide-react';
+import { Plus, Search, X, Trash2, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 
@@ -9,10 +9,13 @@ export default function Sales() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [viewTarget, setViewTarget] = useState(null);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [editingId, setEditingId] = useState(null);
 
     // Form State
     const [customers, setCustomers] = useState([]);
-    const [fgItems, setFgItems] = useState([]);
+    const [batches, setBatches] = useState([]);
 
     const [billNo, setBillNo] = useState('');
     const [customerId, setCustomerId] = useState('');
@@ -28,9 +31,8 @@ export default function Sales() {
         setLoading(true);
         const { data: records, error } = await supabase
             .from('sales_headers')
-            .select('*, customers(name), sales_lines(*, fg_items(name))')
+            .select('*, customers(name), sales_lines(*, fg_items(name), production_headers(batch_no))')
             .order('created_at', { ascending: false });
-
         if (error) toast.error('Error fetching sales: ' + error.message);
         else setData(records);
         setLoading(false);
@@ -38,12 +40,17 @@ export default function Sales() {
 
     const fetchLookups = async () => {
         const { data: c } = await supabase.from('customers').select('id, name');
-        const { data: f } = await supabase.from('fg_items').select('id, name, uom');
+        const { data: b } = await supabase
+            .from('production_headers')
+            .select('id, batch_no, fg_item_id, total_qty, fg_items(name, uom)')
+            .order('date', { ascending: false });
         if (c) setCustomers(c);
-        if (f) setFgItems(f);
+        if (b) setBatches(b);
     };
 
-    const openModal = () => {
+    // ── OPEN CREATE ────────────────────────────────────────────────────────────
+    const openCreateModal = () => {
+        setEditingId(null);
         setBillNo('INV-' + Math.floor(1000 + Math.random() * 9000));
         setCustomerId('');
         setDate(format(new Date(), 'yyyy-MM-dd'));
@@ -51,8 +58,57 @@ export default function Sales() {
         setIsModalOpen(true);
     };
 
+    // ── OPEN EDIT ──────────────────────────────────────────────────────────────
+    const openEditModal = (row) => {
+        setEditingId(row.id);
+        setBillNo(row.bill_no);
+        setCustomerId(row.customer_id);
+        setDate(row.date);
+        setLines((row.sales_lines || []).map(l => ({
+            id: l.id,
+            batch_id: l.production_header_id || '',
+            fg_item_id: l.fg_item_id,
+            fg_item_name: l.fg_items?.name,
+            qty: l.qty,
+            unit_price: l.unit_price,
+            availableQty: null
+        })));
+        setIsModalOpen(true);
+    };
+
+    const closeModal = () => {
+        setIsModalOpen(false);
+        setEditingId(null);
+        setLines([]);
+    };
+
     const addLine = () => {
-        setLines([...lines, { id: Date.now(), fg_item_id: '', qty: 1, unit_price: 0 }]);
+        setLines([...lines, { id: Date.now(), batch_id: '', fg_item_id: '', fg_item_name: '', qty: '', unit_price: '', availableQty: null }]);
+    };
+
+    const selectBatch = async (lineId, batchId) => {
+        const batch = batches.find(b => b.id === batchId);
+        if (!batch) {
+            setLines(lines.map(l => l.id === lineId ? { ...l, batch_id: '', fg_item_id: '', fg_item_name: '', availableQty: null } : l));
+            return;
+        }
+
+        const { data: soldRows } = await supabase
+            .from('sales_lines')
+            .select('qty')
+            .eq('fg_item_id', batch.fg_item_id);
+
+        const totalSold = soldRows ? soldRows.reduce((s, r) => s + Number(r.qty), 0) : 0;
+        const batchQty = Number(batch.total_qty);
+        const available = Math.max(0, Math.min(batchQty, batchQty - totalSold));
+
+        setLines(lines.map(l => l.id === lineId ? {
+            ...l,
+            batch_id: batchId,
+            fg_item_id: batch.fg_item_id,
+            fg_item_name: batch.fg_items?.name,
+            availableQty: available
+        } : l));
     };
 
     const updateLine = (id, field, value) => {
@@ -67,6 +123,7 @@ export default function Sales() {
         return lines.reduce((acc, l) => acc + (Number(l.qty) * Number(l.unit_price)), 0);
     };
 
+    // ── SUBMIT (CREATE or UPDATE) ──────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (lines.length === 0) return toast.error('Add at least one item line');
@@ -77,26 +134,47 @@ export default function Sales() {
             }
         }
 
-        const payload = {
-            bill_no: billNo,
-            customer_id: customerId,
-            date,
-            lines: lines.map(l => ({
-                fg_item_id: l.fg_item_id,
-                qty: Number(l.qty),
-                unit_price: Number(l.unit_price)
-            }))
-        };
+        const linePayload = lines.map(l => ({
+            fg_item_id: l.fg_item_id,
+            qty: Number(l.qty),
+            unit_price: Number(l.unit_price),
+            production_header_id: l.batch_id || null
+        }));
 
-        const { data: res, error } = await supabase.rpc('post_sales', { payload });
-
-        if (error) {
-            toast.error('Transaction Failed: ' + error.message);
+        if (editingId) {
+            const payload = { header_id: editingId, customer_id: customerId, date, lines: linePayload };
+            const { error } = await supabase.rpc('update_sales', { payload });
+            if (error) {
+                toast.error('Update Failed: ' + error.message);
+            } else {
+                toast.success('Sale Updated Successfully!');
+                closeModal();
+                fetchData();
+            }
         } else {
-            toast.success('Sale Posted Successfully!');
-            setIsModalOpen(false);
+            const payload = { bill_no: billNo, customer_id: customerId, date, lines: linePayload };
+            const { error } = await supabase.rpc('post_sales', { payload });
+            if (error) {
+                toast.error('Transaction Failed: ' + error.message);
+            } else {
+                toast.success('Sale Posted Successfully!');
+                closeModal();
+                fetchData();
+            }
+        }
+    };
+
+    // ── DELETE ─────────────────────────────────────────────────────────────────
+    const handleDelete = async () => {
+        if (!deleteTarget) return;
+        const { error } = await supabase.rpc('delete_sales', { p_header_id: deleteTarget.id });
+        if (error) {
+            toast.error('Delete Failed: ' + error.message);
+        } else {
+            toast.success('Sale deleted and FG stock restored.');
             fetchData();
         }
+        setDeleteTarget(null);
     };
 
     const filteredData = data.filter(item =>
@@ -111,7 +189,7 @@ export default function Sales() {
                     <h2>Sales (Out)</h2>
                     <p>Record finished goods sales to customers</p>
                 </div>
-                <button className="btn-primary" onClick={openModal}>
+                <button className="btn-primary" onClick={openCreateModal}>
                     <Plus size={18} /> New Sale
                 </button>
             </div>
@@ -138,47 +216,75 @@ export default function Sales() {
                                 <th>Bill No</th>
                                 <th>Date</th>
                                 <th>Customer</th>
-                                <th>Lines</th>
+                                <th>Items</th>
                                 <th>Total Amount</th>
+                                <th style={{ textAlign: 'center' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {filteredData.map(row => (
                                 <tr key={row.id}>
-                                    <td><strong>{row.bill_no}</strong></td>
+                                    <td>
+                                        <button
+                                            onClick={() => setViewTarget(row)}
+                                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#3b82f6', fontWeight: 700, textDecoration: 'underline' }}
+                                        >
+                                            {row.bill_no}
+                                        </button>
+                                    </td>
                                     <td>{format(new Date(row.date), 'MMM dd, yyyy')}</td>
                                     <td>{row.customers?.name}</td>
-                                    <td>
-                                        {row.sales_lines?.map((l, i) => (
-                                            <div key={i} style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                                {l.qty} x {l.fg_items?.name} (@ ${l.unit_price})
-                                            </div>
-                                        ))}
+                                    <td>{row.sales_lines?.length || 0} items</td>
+                                    <td>LKR {Number(row.total_amount).toFixed(2)}</td>
+                                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                        <button
+                                            className="btn-icon"
+                                            title="Edit"
+                                            onClick={() => openEditModal(row)}
+                                            style={{ marginRight: '6px', color: '#3b82f6' }}
+                                        >
+                                            <Pencil size={15} />
+                                        </button>
+                                        <button
+                                            className="btn-icon"
+                                            title="Delete"
+                                            onClick={() => setDeleteTarget(row)}
+                                            style={{ color: '#ef4444' }}
+                                        >
+                                            <Trash2 size={15} />
+                                        </button>
                                     </td>
-                                    <td>${Number(row.total_amount).toFixed(2)}</td>
                                 </tr>
                             ))}
                             {filteredData.length === 0 && (
-                                <tr><td colSpan="5" className="empty-state">No sales found.</td></tr>
+                                <tr><td colSpan="6" className="empty-state">No sales found.</td></tr>
                             )}
                         </tbody>
                     </table>
                 )}
             </div>
 
+            {/* ── CREATE / EDIT MODAL ── */}
             {isModalOpen && (
                 <div className="modal-backdrop">
-                    <div className="modal-content" style={{ maxWidth: '800px' }}>
+                    <div className="modal-content" style={{ maxWidth: '860px' }}>
                         <div className="modal-header">
-                            <h3>Create Sales Invoice</h3>
-                            <button className="btn-icon" onClick={() => setIsModalOpen(false)}><X size={20} /></button>
+                            <h3>{editingId ? 'Edit Sales Invoice' : 'Create Sales Invoice'}</h3>
+                            <button className="btn-icon" onClick={closeModal}><X size={20} /></button>
                         </div>
 
                         <form onSubmit={handleSubmit} className="modal-form">
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
                                 <div className="form-group">
                                     <label>Bill No</label>
-                                    <input type="text" value={billNo} onChange={e => setBillNo(e.target.value)} required />
+                                    <input
+                                        type="text"
+                                        value={billNo}
+                                        onChange={e => setBillNo(e.target.value)}
+                                        readOnly={!!editingId}
+                                        style={editingId ? { background: '#f1f5f9', cursor: 'not-allowed' } : {}}
+                                        required
+                                    />
                                 </div>
                                 <div className="form-group">
                                     <label>Date</label>
@@ -194,16 +300,17 @@ export default function Sales() {
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                                <h4>Sale Items (FG)</h4>
+                                <h4>Sale Items</h4>
                                 <button type="button" className="btn-secondary" onClick={addLine}><Plus size={16} /> Add Line</button>
                             </div>
 
                             <table className="data-table" style={{ marginBottom: '1rem' }}>
                                 <thead>
                                     <tr>
-                                        <th>Finished Good Item</th>
-                                        <th>Qty Sold</th>
-                                        <th>Unit Price</th>
+                                        <th>Production Batch</th>
+                                        <th>Product (FG)</th>
+                                        <th>Packets</th>
+                                        <th>Unit Price (LKR)</th>
                                         <th>Subtotal</th>
                                         <th></th>
                                     </tr>
@@ -212,34 +319,154 @@ export default function Sales() {
                                     {lines.map(line => (
                                         <tr key={line.id}>
                                             <td>
-                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.fg_item_id} onChange={e => updateLine(line.id, 'fg_item_id', e.target.value)} required>
-                                                    <option value="">Select Item</option>
-                                                    {fgItems.map(f => <option key={f.id} value={f.id}>{f.name} ({f.uom})</option>)}
+                                                <select
+                                                    className="form-group"
+                                                    style={{ marginBottom: 0, minWidth: '140px' }}
+                                                    value={line.batch_id}
+                                                    onChange={e => selectBatch(line.id, e.target.value)}
+                                                >
+                                                    <option value="">Select Batch</option>
+                                                    {batches.map(b => (
+                                                        <option key={b.id} value={b.id}>{b.batch_no}</option>
+                                                    ))}
                                                 </select>
                                             </td>
                                             <td>
-                                                <input className="form-group" style={{ marginBottom: 0, width: '80px' }} type="number" min="0.01" step="0.01" value={line.qty} onChange={e => updateLine(line.id, 'qty', e.target.value)} required />
+                                                {line.fg_item_name ? (
+                                                    <span style={{ fontWeight: 600, color: '#1e293b' }}>{line.fg_item_name}</span>
+                                                ) : (
+                                                    <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>— select batch —</span>
+                                                )}
                                             </td>
                                             <td>
-                                                <input className="form-group" style={{ marginBottom: 0, width: '100px' }} type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(line.id, 'unit_price', e.target.value)} required />
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <input
+                                                        className="form-group"
+                                                        style={{ marginBottom: 0, width: '90px' }}
+                                                        type="number" min="1" step="1"
+                                                        value={line.qty}
+                                                        onChange={e => updateLine(line.id, 'qty', e.target.value)}
+                                                        required
+                                                    />
+                                                    {line.availableQty !== null && (
+                                                        <span style={{
+                                                            fontSize: '0.72rem', fontWeight: 600, padding: '2px 6px',
+                                                            borderRadius: '4px', whiteSpace: 'nowrap',
+                                                            background: line.availableQty <= 0 ? '#fee2e2' : line.availableQty < 20 ? '#fef9c3' : '#dcfce7',
+                                                            color: line.availableQty <= 0 ? '#dc2626' : line.availableQty < 20 ? '#ca8a04' : '#16a34a',
+                                                        }}>
+                                                            In stock: {Number(line.availableQty).toFixed(0)} pkts
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
-                                            <td>${(line.qty * line.unit_price).toFixed(2)}</td>
+                                            <td>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>LKR</span>
+                                                    <input
+                                                        className="form-group"
+                                                        style={{ marginBottom: 0, width: '100px' }}
+                                                        type="number" min="0" step="0.01"
+                                                        value={line.unit_price}
+                                                        onChange={e => updateLine(line.id, 'unit_price', e.target.value)}
+                                                        required
+                                                    />
+                                                </div>
+                                            </td>
+                                            <td>LKR {(Number(line.qty) * Number(line.unit_price)).toFixed(2)}</td>
                                             <td><button type="button" className="btn-icon" onClick={() => removeLine(line.id)}><Trash2 size={16} /></button></td>
                                         </tr>
                                     ))}
-                                    {lines.length === 0 && <tr><td colSpan="5" className="text-muted" style={{ textAlign: 'center' }}>No items added</td></tr>}
+                                    {lines.length === 0 && (
+                                        <tr><td colSpan="6" className="text-muted" style={{ textAlign: 'center' }}>No items added</td></tr>
+                                    )}
                                 </tbody>
                             </table>
 
                             <div style={{ textAlign: 'right', fontSize: '1.25rem', marginBottom: '2rem' }}>
-                                <strong>Total: ${calculateTotal().toFixed(2)}</strong>
+                                <strong>Total: LKR {calculateTotal().toFixed(2)}</strong>
                             </div>
 
                             <div className="modal-actions">
-                                <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
-                                <button type="submit" className="btn-primary">Post Sale (Update Stock)</button>
+                                <button type="button" className="btn-secondary" onClick={closeModal}>Cancel</button>
+                                <button type="submit" className="btn-primary">
+                                    {editingId ? 'Update Sale' : 'Post Sale (Update Stock)'}
+                                </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ── DELETE CONFIRM MODAL ── */}
+            {deleteTarget && (
+                <div className="modal-backdrop">
+                    <div className="modal-content" style={{ maxWidth: '420px' }}>
+                        <div className="modal-header">
+                            <h3>Confirm Delete</h3>
+                            <button className="btn-icon" onClick={() => setDeleteTarget(null)}><X size={20} /></button>
+                        </div>
+                        <div className="modal-form">
+                            <p style={{ marginBottom: '1.5rem', color: '#475569' }}>
+                                Are you sure you want to delete invoice <strong>{deleteTarget.bill_no}</strong>?
+                                <br /><span style={{ color: '#ef4444', fontSize: '0.9rem' }}>⚠ This will restore the FG stock quantities sold in this invoice.</span>
+                            </p>
+                            <div className="modal-actions">
+                                <button className="btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                                <button className="btn-primary" onClick={handleDelete} style={{ background: '#ef4444' }}>
+                                    Delete & Restore Stock
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── BILL DETAIL MODAL ── */}
+            {viewTarget && (
+                <div className="modal-backdrop">
+                    <div className="modal-content" style={{ maxWidth: '650px' }}>
+                        <div className="modal-header">
+                            <div>
+                                <h3>{viewTarget.bill_no}</h3>
+                                <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+                                    {format(new Date(viewTarget.date), 'MMM dd, yyyy')}&nbsp;|&nbsp;{viewTarget.customers?.name}
+                                </p>
+                            </div>
+                            <button className="btn-icon" onClick={() => setViewTarget(null)}><X size={20} /></button>
+                        </div>
+                        <div className="modal-form">
+                            <table className="data-table" style={{ marginBottom: '1rem' }}>
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Batch No</th>
+                                        <th>Product</th>
+                                        <th>Qty (Pkts)</th>
+                                        <th>Unit Price</th>
+                                        <th>Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(viewTarget.sales_lines || []).map((l, i) => (
+                                        <tr key={l.id}>
+                                            <td style={{ color: '#94a3b8' }}>{i + 1}</td>
+                                            <td><strong>{l.production_headers?.batch_no || '—'}</strong></td>
+                                            <td>{l.fg_items?.name}</td>
+                                            <td>{Number(l.qty).toFixed(0)}</td>
+                                            <td>LKR {Number(l.unit_price).toFixed(2)}</td>
+                                            <td>LKR {Number(l.total_amount).toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                    {(viewTarget.sales_lines || []).length === 0 && (
+                                        <tr><td colSpan="6" className="empty-state">No lines found.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                            <div style={{ textAlign: 'right', fontSize: '1.1rem', fontWeight: 700, borderTop: '1px solid #e2e8f0', paddingTop: '0.75rem' }}>
+                                Grand Total: LKR {Number(viewTarget.total_amount).toFixed(2)}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
