@@ -22,7 +22,7 @@ export default function FgStockReport() {
         // 1. Get each production line with batch details
         const { data: prodLines } = await supabase
             .from('production_lines')
-            .select('id, fg_item_id, total_qty, qty_per_packet, production_header_id, fg_items(name, uom), production_headers(batch_no, date)');
+            .select('id, fg_item_id, total_qty, qty_per_packet, production_header_id, fg_items(name, batch_code), production_headers(batch_no, date)');
 
         // 2. Get sales lines with production_line_id to match per packet-size
         const { data: salesLines } = await supabase
@@ -51,7 +51,7 @@ export default function FgStockReport() {
                 batch_no: pl.production_headers?.batch_no || '—',
                 date: pl.production_headers?.date,
                 product: pl.fg_items?.name || '—',
-                uom: pl.fg_items?.uom || '',
+                batch_code: pl.fg_items?.batch_code || '',
                 produced,
                 qty_per_packet: Number(pl.qty_per_packet),
                 total_sold: sold,
@@ -110,7 +110,10 @@ export default function FgStockReport() {
                                     <tr key={i}>
                                         <td style={{ fontWeight: 700, color: '#3b82f6' }}>{r.batch_no}</td>
                                         <td>{r.date ? format(new Date(r.date), 'MMM dd, yyyy') : '—'}</td>
-                                        <td style={{ fontWeight: 600 }}>{r.product}</td>
+                                        <td style={{ fontWeight: 600 }}>
+                                            {r.product}
+                                            {r.batch_code && <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 400 }}>Code: {r.batch_code}</div>}
+                                        </td>
                                         <td>{formatPacketSize(r.qty_per_packet)}</td>
                                         <td>{r.produced} pkts</td>
                                         <td style={{ color: r.total_sold > 0 ? '#dc2626' : '#64748b' }}>

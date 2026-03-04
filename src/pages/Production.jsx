@@ -43,7 +43,7 @@ export default function Production() {
     };
 
     const fetchLookups = async () => {
-        const { data: f } = await supabase.from('fg_items').select('id, name, uom');
+        const { data: f } = await supabase.from('fg_items').select('id, name, batch_code');
         const { data: p } = await supabase.from('purchase_headers').select('id, purchase_no');
         const { data: r } = await supabase.from('raw_items').select('id, name, uom');
         const { data: pl } = await supabase.from('purchase_lines').select('purchase_header_id, raw_item_id');
@@ -61,9 +61,35 @@ export default function Production() {
         return g >= 1000 ? `${g / 1000}kg` : `${g}g`;
     };
 
+    const generateNextBatchNo = async (prefix) => {
+        if (!prefix) return "";
+        const { data: rows, error } = await supabase
+            .from('production_headers')
+            .select('batch_no')
+            .ilike('batch_no', `${prefix}-%`)
+            .order('batch_no', { ascending: false })
+            .limit(1);
+
+        if (error) {
+            console.error("Error generating batch no:", error);
+            return "";
+        }
+
+        let nextNum = 1;
+        if (rows && rows.length > 0) {
+            const lastNo = rows[0].batch_no;
+            const parts = lastNo.split('-');
+            const lastNum = parseInt(parts[parts.length - 1]);
+            if (!isNaN(lastNum)) {
+                nextNum = lastNum + 1;
+            }
+        }
+        return `${prefix}-${String(nextNum).padStart(3, '0')}`;
+    };
+
     const openCreateModal = () => {
         setEditingId(null);
-        setBatchNo('BATCH-' + Math.floor(1000 + Math.random() * 9000));
+        setBatchNo('');
         setDate(format(new Date(), 'yyyy-MM-dd'));
         setMfd(format(new Date(), 'yyyy-MM-dd'));
         setExp(format(new Date(new Date().setFullYear(new Date().getFullYear() + 1)), 'yyyy-MM-dd'));
@@ -152,8 +178,18 @@ export default function Production() {
         setProdLines([...prodLines, { id: Date.now(), fg_item_id: '', qty_per_packet: '', total_qty: '' }]);
     };
 
-    const updateProdLine = (id, field, value) => {
-        setProdLines(prodLines.map(pl => pl.id === id ? { ...pl, [field]: value } : pl));
+    const updateProdLine = async (id, field, value) => {
+        const updatedLines = prodLines.map(pl => pl.id === id ? { ...pl, [field]: value } : pl);
+        setProdLines(updatedLines);
+
+        // Auto-generate Batch No when first item is selected (only for NEW records)
+        if (!editingId && field === 'fg_item_id' && id === prodLines[0]?.id && value) {
+            const item = fgItems.find(f => f.id === value);
+            if (item && item.batch_code) {
+                const nextNo = await generateNextBatchNo(item.batch_code);
+                setBatchNo(nextNo);
+            }
+        }
     };
 
     const removeProdLine = (id) => {
@@ -388,7 +424,7 @@ export default function Production() {
                                             <td>
                                                 <select className="form-group" style={{ marginBottom: 0 }} value={line.fg_item_id} onChange={e => updateProdLine(line.id, 'fg_item_id', e.target.value)} required>
                                                     <option value="">Select FG</option>
-                                                    {fgItems.map(f => <option key={f.id} value={f.id}>{f.name} ({f.uom})</option>)}
+                                                    {fgItems.map(f => <option key={f.id} value={f.id}>{f.name} {f.batch_code ? `[${f.batch_code}]` : ''}</option>)}
                                                 </select>
                                             </td>
                                             <td>

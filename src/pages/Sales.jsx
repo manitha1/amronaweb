@@ -45,7 +45,7 @@ export default function Sales() {
             .select(`
                 id, fg_item_id, total_qty, qty_per_packet,
                 production_headers(id, batch_no, date),
-                fg_items(name, uom)
+                fg_items(name, batch_code)
             `)
             .order('production_headers(date)', { ascending: false });
         if (c) setCustomers(c);
@@ -372,7 +372,7 @@ export default function Sales() {
                                                 >
                                                     <option value="">Select Batch Item</option>
                                                     {batches.map(b => (
-                                                        <option key={b.id} value={b.id}>{b.production_headers?.batch_no} - {b.fg_items?.name} ({formatPacketSize(b.qty_per_packet)})</option>
+                                                        <option key={b.id} value={b.id}>{b.production_headers?.batch_no} - {b.fg_items?.name} {b.fg_items?.batch_code ? `[${b.fg_items.batch_code}]` : ''} ({formatPacketSize(b.qty_per_packet)})</option>
                                                     ))}
                                                 </select>
                                             </td>

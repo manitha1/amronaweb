@@ -13,15 +13,26 @@ import Sales from './pages/Sales';
 import RawStockReport from './pages/RawStockReport';
 import FgStockReport from './pages/FgStockReport';
 
-const itemColumns = [
+const rawItemColumns = [
     { key: 'code', label: 'Item Code' },
     { key: 'name', label: 'Item Name' },
     { key: 'uom', label: 'UOM / Unit' }
 ];
 
-const itemFields = [
+const rawItemFields = [
     { name: 'name', label: 'Item Name', required: true },
     { name: 'uom', label: 'UOM / Unit', required: true, type: 'select', options: ['Kg', 'g'] }
+];
+
+const fgItemColumns = [
+    { key: 'code', label: 'Item Code' },
+    { key: 'name', label: 'Item Name' },
+    { key: 'batch_code', label: 'Batch Number Code' }
+];
+
+const fgItemFields = [
+    { name: 'name', label: 'Item Name', required: true },
+    { name: 'batch_code', label: 'Batch Number Code', required: true }
 ];
 
 const contactColumns = [
@@ -54,8 +65,8 @@ function App() {
                         <Route path="/" element={<Layout />}>
                             <Route index element={<Dashboard />} />
 
-                            <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={itemColumns} formFields={itemFields} codeRange={{ min: 1000, max: 1999 }} />} />
-                            <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={itemColumns} formFields={itemFields} codeRange={{ min: 2000, max: 2999 }} />} />
+                            <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={rawItemColumns} formFields={rawItemFields} codeRange={{ min: 1000, max: 1999 }} />} />
+                            <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={fgItemColumns} formFields={fgItemFields} codeRange={{ min: 2000, max: 2999 }} />} />
                             <Route path="suppliers" element={<MasterDataPage title="Suppliers" tableName="suppliers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 3000, max: 4000 }} />} />
                             <Route path="customers" element={<MasterDataPage title="Customers" tableName="customers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 4001, max: 5000 }} />} />
 
