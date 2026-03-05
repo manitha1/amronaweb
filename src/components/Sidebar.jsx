@@ -53,6 +53,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         <NavLink to="/fg-stock" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
                             <PackageSearch size={20} /> Produce Stock
                         </NavLink>
+                        <NavLink to="/summary" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                            <BarChart2 size={20} /> Summary Report
+                        </NavLink>
                     </div>
 
                     <div className="nav-group">

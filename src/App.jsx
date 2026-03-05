@@ -12,6 +12,7 @@ import Production from './pages/Production';
 import Sales from './pages/Sales';
 import RawStockReport from './pages/RawStockReport';
 import FgStockReport from './pages/FgStockReport';
+import SummaryReport from './pages/SummaryReport';
 
 const rawItemColumns = [
     { key: 'code', label: 'Item Code' },
@@ -75,6 +76,7 @@ function App() {
                             <Route path="sales" element={<Sales />} />
                             <Route path="raw-stock" element={<RawStockReport />} />
                             <Route path="fg-stock" element={<FgStockReport />} />
+                            <Route path="summary" element={<SummaryReport />} />
                         </Route>
 
                         <Route path="*" element={<Navigate to="/" replace />} />
