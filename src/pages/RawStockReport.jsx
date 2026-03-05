@@ -56,7 +56,7 @@ export default function RawStockReport() {
         <div className="page-container">
             <div className="page-header-row">
                 <div>
-                    <h2>Raw Material Stock by Purchase</h2>
+                    <h2>Raw Stock</h2>
                     <p>Live stock status per purchase order</p>
                 </div>
                 <button className="btn-secondary" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

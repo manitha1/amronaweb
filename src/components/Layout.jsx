@@ -6,8 +6,8 @@ import { useAuth } from '../context/AuthContext';
 
 const PAGE_TITLES = {
     '/': 'Dashboard',
-    '/raw-stock': 'Raw Stock Report',
-    '/fg-stock': 'FG Stock Report',
+    '/raw-stock': 'Raw Stock',
+    '/fg-stock': 'FG Stock',
     '/purchasing': 'Purchasing',
     '/production': 'Production',
     '/sales': 'Sales',

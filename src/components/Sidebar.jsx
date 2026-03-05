@@ -51,7 +51,7 @@ export default function Sidebar({ isOpen, onClose }) {
                             <Package size={20} /> Raw Stock
                         </NavLink>
                         <NavLink to="/fg-stock" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-                            <PackageSearch size={20} /> FG Stock
+                            <PackageSearch size={20} /> Produce Stock
                         </NavLink>
                     </div>
 
@@ -80,7 +80,7 @@ export default function Sidebar({ isOpen, onClose }) {
                             <Truck size={20} /> Suppliers
                         </NavLink>
                         <NavLink to="/customers" onClick={handleNavClick} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-                            <Users size={20} /> Customers
+                            <Users size={20} /> Buyers
                         </NavLink>
                     </div>
                 </nav>

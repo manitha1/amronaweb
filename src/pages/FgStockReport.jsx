@@ -72,7 +72,7 @@ export default function FgStockReport() {
         <div className="page-container">
             <div className="page-header-row">
                 <div>
-                    <h2>Finished Goods Stock by Batch</h2>
+                    <h2>FG Stock</h2>
                     <p>Live stock status per production batch</p>
                 </div>
                 <button className="btn-secondary" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

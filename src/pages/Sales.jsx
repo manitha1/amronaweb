@@ -52,10 +52,38 @@ export default function Sales() {
         if (b) setBatches(b);
     };
 
+    const generateNextInvoiceNo = async () => {
+        const { data: rows, error } = await supabase
+            .from('sales_headers')
+            .select('bill_no')
+            .ilike('bill_no', 'INV-%')
+            .order('bill_no', { ascending: false })
+            .limit(1);
+
+        if (error) {
+            console.error("Error generating invoice no:", error);
+            return "INV-0001";
+        }
+
+        let nextNum = 1;
+        if (rows && rows.length > 0) {
+            const lastNo = rows[0].bill_no;
+            const parts = lastNo.split('-');
+            if (parts.length > 1) {
+                const lastNum = parseInt(parts[1], 10);
+                if (!isNaN(lastNum)) {
+                    nextNum = lastNum + 1;
+                }
+            }
+        }
+        return `INV-${String(nextNum).padStart(4, '0')}`;
+    };
+
     // ── OPEN CREATE ────────────────────────────────────────────────────────────
-    const openCreateModal = () => {
+    const openCreateModal = async () => {
         setEditingId(null);
-        setBillNo('INV-' + Math.floor(1000 + Math.random() * 9000));
+        const nextInv = await generateNextInvoiceNo();
+        setBillNo(nextInv);
         setCustomerId('');
         setDate(format(new Date(), 'yyyy-MM-dd'));
         setLines([]);

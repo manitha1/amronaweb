@@ -48,7 +48,7 @@ export default function Login() {
                     <img src={amronaLogo} alt="Amrona Logo" />
                     <h1>Amrona Inventory</h1>
                     <p>
-                        Smart spice manufacturing &amp; inventory management for your growing business.
+                        Spices Manufacturing, Distributing &amp; Exporting
                     </p>
                     <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '2rem', flexWrap: 'wrap' }}>
                         {['Purchase Tracking', 'Production Control', 'Sales Management', 'Stock Reports'].map(f => (

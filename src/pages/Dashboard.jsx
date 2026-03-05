@@ -3,7 +3,7 @@ import { supabase } from '../supabase';
 import { useNavigate } from 'react-router-dom';
 import {
     Package, PackageSearch, ShoppingCart, Factory,
-    TrendingUp, AlertTriangle, ChevronRight, ArrowUpRight
+    TrendingUp, AlertTriangle, ChevronRight, ArrowUpRight, Printer
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -28,6 +28,9 @@ export default function Dashboard() {
     const [recentSales, setRecentSales] = useState([]);
     const [rawByItem, setRawByItem] = useState([]);
     const [fgByItem, setFgByItem] = useState([]);
+
+    // Print State
+    const [printingRawStock, setPrintingRawStock] = useState(false);
 
     useEffect(() => { fetchAll(); }, []);
 
@@ -178,6 +181,19 @@ export default function Dashboard() {
     const fmt = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     const fmtCur = (n) => 'Rs. ' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+    const handleRawStockPrint = () => {
+        setPrintingRawStock(true);
+        setTimeout(() => {
+            window.print();
+        }, 300);
+    };
+
+    useEffect(() => {
+        const afterPrint = () => setPrintingRawStock(false);
+        window.addEventListener('afterprint', afterPrint);
+        return () => window.removeEventListener('afterprint', afterPrint);
+    }, []);
+
     // Low stock items: balance < 20% of purchased
     const lowStockRaw = rawByItem.filter(r => {
         const pct = r.purchased > 0 ? (r.balance / r.purchased) * 100 : 0;
@@ -205,295 +221,352 @@ export default function Dashboard() {
     return (
         <div className="page-container">
 
-            {/* ── PAGE TITLE ── */}
-            <div className="page-header">
-                <h2>Welcome Back 👋</h2>
-                <p>Here's what's happening with Amrona today.</p>
-            </div>
-
-            {/* ── STAT CARDS ── */}
-            <div className="dashboard-cards">
-                <div className="stat-card green">
-                    <div className="stat-card-icon"><Package size={52} /></div>
-                    <div className="stat-card-label">Raw Materials Stock</div>
-                    <div className="stat-card-value">
-                        {fmt(rawBalance)}<span className="stat-card-unit">Kg</span>
+            {/* ── STANDARD DASHBOARD (HIDDEN DURING PRINT) ── */}
+            {!printingRawStock && (
+                <>
+                    {/* ── PAGE TITLE ── */}
+                    <div className="page-header">
+                        <h2>Welcome Back 👋</h2>
+                        <p>Here's what's happening with Amrona today.</p>
                     </div>
-                    <div className="stat-card-sub">Balance from stock ledger</div>
-                </div>
 
-                <div className="stat-card orange">
-                    <div className="stat-card-icon"><Factory size={52} /></div>
-                    <div className="stat-card-label">Production Batches</div>
-                    <div className="stat-card-value">
-                        {activeBatches}<span className="stat-card-unit">Batches</span>
-                    </div>
-                    <div className="stat-card-sub">Total production runs</div>
-                </div>
-
-                <div className="stat-card blue">
-                    <div className="stat-card-icon"><PackageSearch size={52} /></div>
-                    <div className="stat-card-label">Finished Goods Stock</div>
-                    <div className="stat-card-value">
-                        {fmt(fgBalance)}<span className="stat-card-unit">Pkts</span>
-                    </div>
-                    <div className="stat-card-sub">Balance from stock ledger</div>
-                </div>
-
-                <div className="stat-card red">
-                    <div className="stat-card-icon"><TrendingUp size={52} /></div>
-                    <div className="stat-card-label">Total Sales</div>
-                    <div className="stat-card-value" style={{ fontSize: '1.75rem' }}>
-                        {fmtCur(totalSales)}
-                    </div>
-                    <div className="stat-card-sub">This month's revenue</div>
-                </div>
-            </div>
-
-            {/* ── ROW 2: Recent Purchases + Low Stock ── */}
-            <div className="dash-grid-2">
-
-                {/* Recent Purchases */}
-                <div className="card">
-                    <div className="card-header">
-                        <div className="card-title">
-                            <span style={{
-                                background: '#dbeafe', color: 'var(--blue)',
-                                width: 28, height: 28, borderRadius: 8,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center'
-                            }}>
-                                <ShoppingCart size={15} />
-                            </span>
-                            Recent Purchases
+                    {/* ── STAT CARDS ── */}
+                    <div className="dashboard-cards">
+                        <div className="stat-card green">
+                            <div className="stat-card-icon"><Package size={52} /></div>
+                            <div className="stat-card-label">Raw Materials Stock</div>
+                            <div className="stat-card-value">
+                                {fmt(rawBalance)}<span className="stat-card-unit">Kg</span>
+                            </div>
+                            <div className="stat-card-sub">Balance from stock ledger</div>
                         </div>
-                        <button className="view-all-btn" onClick={() => navigate('/purchasing')}>
-                            View All <ChevronRight size={14} />
-                        </button>
+
+                        <div className="stat-card orange">
+                            <div className="stat-card-icon"><Factory size={52} /></div>
+                            <div className="stat-card-label">Production Batches</div>
+                            <div className="stat-card-value">
+                                {activeBatches}<span className="stat-card-unit">Batches</span>
+                            </div>
+                            <div className="stat-card-sub">Total production runs</div>
+                        </div>
+
+                        <div className="stat-card blue">
+                            <div className="stat-card-icon"><PackageSearch size={52} /></div>
+                            <div className="stat-card-label">Finished Goods Stock</div>
+                            <div className="stat-card-value">
+                                {fmt(fgBalance)}<span className="stat-card-unit">Pkts</span>
+                            </div>
+                            <div className="stat-card-sub">Balance from stock ledger</div>
+                        </div>
+
+                        <div className="stat-card red">
+                            <div className="stat-card-icon"><TrendingUp size={52} /></div>
+                            <div className="stat-card-label">Total Sales</div>
+                            <div className="stat-card-value" style={{ fontSize: '1.75rem' }}>
+                                {fmtCur(totalSales)}
+                            </div>
+                            <div className="stat-card-sub">This month's revenue</div>
+                        </div>
                     </div>
-                    <table className="data-table">
+
+                    {/* ── ROW 2: Recent Purchases + Low Stock ── */}
+                    <div className="dash-grid-2">
+
+                        {/* Recent Purchases */}
+                        <div className="card">
+                            <div className="card-header">
+                                <div className="card-title">
+                                    <span style={{
+                                        background: '#dbeafe', color: 'var(--blue)',
+                                        width: 28, height: 28, borderRadius: 8,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        <ShoppingCart size={15} />
+                                    </span>
+                                    Recent Purchases
+                                </div>
+                                <button className="view-all-btn" onClick={() => navigate('/purchasing')}>
+                                    View All <ChevronRight size={14} />
+                                </button>
+                            </div>
+                            <div className="table-card">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PO #</th>
+                                            <th>Supplier</th>
+                                            <th>Date</th>
+                                            <th>Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {recentPurchases.map((p, i) => (
+                                            <tr key={i}>
+                                                <td><span className="purchase-po">{p.purchase_no}</span></td>
+                                                <td className="purchase-supplier">{p.supplier_name}</td>
+                                                <td style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                                                    {p.date ? new Date(p.date).toLocaleDateString('en-GB') : '—'}
+                                                </td>
+                                                <td className="purchase-amount">{fmtCur(p.total_amount)}</td>
+                                            </tr>
+                                        ))}
+                                        {recentPurchases.length === 0 && (
+                                            <tr><td colSpan={4} className="empty-state">No purchases yet.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Low Stock Alerts */}
+                        <div className="card">
+                            <div className="card-header">
+                                <div className="card-title">
+                                    <span style={{
+                                        background: '#fef3c7', color: 'var(--amber)',
+                                        width: 28, height: 28, borderRadius: 8,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        <AlertTriangle size={15} />
+                                    </span>
+                                    Low Stock Alerts
+                                </div>
+                                {lowStockRaw.length > 0 && (
+                                    <span className="status-badge red">{lowStockRaw.length} items</span>
+                                )}
+                            </div>
+                            <div className="card-body">
+                                {lowStockRaw.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--muted)' }}>
+                                        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</div>
+                                        <p style={{ fontSize: '0.875rem' }}>All stocks are healthy!</p>
+                                    </div>
+                                ) : (
+                                    lowStockRaw.map((item, i) => {
+                                        const pct = item.purchased > 0 ? (item.balance / item.purchased) * 100 : 0;
+                                        const isCritical = pct < 10;
+                                        return (
+                                            <div key={i} className="low-stock-item">
+                                                <div>
+                                                    <div className="low-stock-name">{item.name}</div>
+                                                    <div className="low-stock-qty">Balance: {fmt(item.balance)} {item.uom}</div>
+                                                </div>
+                                                <span className={`status-badge ${isCritical ? 'red' : 'amber'}`}>
+                                                    {isCritical ? 'Critical' : 'Low'}
+                                                </span>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ── ROW 3: Raw Stock Table ── */}
+                    <div className="card">
+                        <div className="card-header">
+                            <div className="card-title">
+                                <span style={{
+                                    background: '#dcfce7', color: '#16a34a',
+                                    width: 28, height: 28, borderRadius: 8,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}>
+                                    <Package size={15} />
+                                </span>
+                                Raw Material Stock Overview
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button className="view-all-btn" onClick={handleRawStockPrint} style={{ color: '#64748b' }}>
+                                    <Printer size={14} style={{ marginRight: '4px' }} /> Print
+                                </button>
+                                <button className="view-all-btn" onClick={() => navigate('/raw-stock')}>
+                                    Full Report <ArrowUpRight size={14} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="table-card">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Raw Item</th>
+                                        <th>Purchased</th>
+                                        <th>Consumed</th>
+                                        <th>Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rawByItem.map((r, i) => {
+                                        const pct = r.purchased > 0 ? (r.balance / r.purchased) * 100 : 0;
+                                        const isLow = pct < 20;
+                                        const isEmpty = r.balance <= 0;
+                                        const color = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#22c55e';
+                                        return (
+                                            <tr key={i}>
+                                                <td style={{ fontWeight: 600 }}>{r.name}</td>
+                                                <td>{fmt(r.purchased)} {r.uom}</td>
+                                                <td style={{ color: r.consumed > 0 ? '#ef4444' : 'var(--muted)' }}>
+                                                    {fmt(r.consumed)}
+                                                </td>
+                                                <td>
+                                                    <span style={{ fontWeight: 700, color }}>
+                                                        {fmt(r.balance)} {r.uom}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {rawByItem.length === 0 && (
+                                        <tr><td colSpan={4} className="empty-state">No raw material records.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* ── ROW 4: FG Stock Table ── */}
+                    <div className="card">
+                        <div className="card-header">
+                            <div className="card-title">
+                                <span style={{
+                                    background: '#dbeafe', color: 'var(--blue)',
+                                    width: 28, height: 28, borderRadius: 8,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}>
+                                    <PackageSearch size={15} />
+                                </span>
+                                Finished Goods Stock Overview
+                            </div>
+                            <button className="view-all-btn" onClick={() => navigate('/fg-stock')}>
+                                Full Report <ArrowUpRight size={14} />
+                            </button>
+                        </div>
+                        <div className="table-card">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>FG Item</th>
+                                        <th>Packet Size</th>
+                                        <th>Produced (Pkts)</th>
+                                        <th>Sold (Pkts)</th>
+                                        <th>Balance (Pkts)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {fgByItem.map((f, i) => {
+                                        const pct = f.produced > 0 ? (f.balance / f.produced) * 100 : 0;
+                                        const isLow = pct < 20;
+                                        const isEmpty = f.balance <= 0;
+                                        const color = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#22c55e';
+                                        return (
+                                            <tr key={i}>
+                                                <td style={{ fontWeight: 600 }}>{f.name}</td>
+                                                <td>{f.sizeLabel}</td>
+                                                <td>{fmt(f.produced)}</td>
+                                                <td style={{ color: f.sold > 0 ? '#ef4444' : 'var(--muted)' }}>
+                                                    {fmt(f.sold)}
+                                                </td>
+                                                <td>
+                                                    <span style={{ fontWeight: 700, color }}>
+                                                        {fmt(f.balance)}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {fgByItem.length === 0 && (
+                                        <tr><td colSpan={5} className="empty-state">No finished goods records.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* ── ROW 5: Recent Sales ── */}
+                    <div className="card">
+                        <div className="card-header">
+                            <div className="card-title">
+                                <span style={{
+                                    background: '#fce7f3', color: '#be185d',
+                                    width: 28, height: 28, borderRadius: 8,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}>
+                                    <TrendingUp size={15} />
+                                </span>
+                                Recent Sales
+                            </div>
+                            <button className="view-all-btn" onClick={() => navigate('/sales')}>
+                                View All <ChevronRight size={14} />
+                            </button>
+                        </div>
+                        <div className="table-card">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bill #</th>
+                                        <th>Customer</th>
+                                        <th>Date</th>
+                                        <th>Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {recentSales.map((s, i) => (
+                                        <tr key={i}>
+                                            <td><span className="purchase-po">{s.bill_no}</span></td>
+                                            <td className="purchase-supplier">{s.customer_name}</td>
+                                            <td style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                                                {s.date ? new Date(s.date).toLocaleDateString('en-GB') : '—'}
+                                            </td>
+                                            <td className="purchase-amount">{fmtCur(s.total_amount)}</td>
+                                        </tr>
+                                    ))}
+                                    {recentSales.length === 0 && (
+                                        <tr><td colSpan={4} className="empty-state">No sales yet.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {/* ── PRINT ONLY RAW STOCK TEMPLATE ── */}
+            {printingRawStock && (
+                <div className="print-invoice-container">
+                    <div className="invoice-header">
+                        <div className="invoice-company-details" style={{ width: '100%', textAlign: 'center' }}>
+                            <h1 style={{ fontSize: '32px', marginBottom: '10px' }}>Amrona</h1>
+                            <h2>Raw Material Stock Overview</h2>
+                            <p>Printed on: {new Date().toLocaleDateString('en-GB')}</p>
+                        </div>
+                    </div>
+
+                    <table className="invoice-table" style={{ marginTop: '20px' }}>
                         <thead>
                             <tr>
-                                <th>PO #</th>
-                                <th>Supplier</th>
-                                <th>Date</th>
-                                <th>Amount</th>
+                                <th>Raw Material Item</th>
+                                <th style={{ textAlign: 'right' }}>Total Purchased</th>
+                                <th style={{ textAlign: 'right' }}>Total Consumed</th>
+                                <th style={{ textAlign: 'right' }}>Current Balance</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {recentPurchases.map((p, i) => (
+                            {rawByItem.map((r, i) => (
                                 <tr key={i}>
-                                    <td><span className="purchase-po">{p.purchase_no}</span></td>
-                                    <td className="purchase-supplier">{p.supplier_name}</td>
-                                    <td style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-                                        {p.date ? new Date(p.date).toLocaleDateString('en-GB') : '—'}
-                                    </td>
-                                    <td className="purchase-amount">{fmtCur(p.total_amount)}</td>
+                                    <td style={{ fontWeight: 600 }}>{r.name}</td>
+                                    <td style={{ textAlign: 'right' }}>{fmt(r.purchased)} {r.uom}</td>
+                                    <td style={{ textAlign: 'right' }}>{fmt(r.consumed)} {r.uom}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmt(r.balance)} {r.uom}</td>
                                 </tr>
                             ))}
-                            {recentPurchases.length === 0 && (
-                                <tr><td colSpan={4} className="empty-state">No purchases yet.</td></tr>
+                            {rawByItem.length === 0 && (
+                                <tr>
+                                    <td colSpan="4" style={{ textAlign: 'center' }}>No raw material records found.</td>
+                                </tr>
                             )}
                         </tbody>
                     </table>
                 </div>
-
-                {/* Low Stock Alerts */}
-                <div className="card">
-                    <div className="card-header">
-                        <div className="card-title">
-                            <span style={{
-                                background: '#fef3c7', color: 'var(--amber)',
-                                width: 28, height: 28, borderRadius: 8,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center'
-                            }}>
-                                <AlertTriangle size={15} />
-                            </span>
-                            Low Stock Alerts
-                        </div>
-                        {lowStockRaw.length > 0 && (
-                            <span className="status-badge red">{lowStockRaw.length} items</span>
-                        )}
-                    </div>
-                    <div className="card-body">
-                        {lowStockRaw.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--muted)' }}>
-                                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</div>
-                                <p style={{ fontSize: '0.875rem' }}>All stocks are healthy!</p>
-                            </div>
-                        ) : (
-                            lowStockRaw.map((item, i) => {
-                                const pct = item.purchased > 0 ? (item.balance / item.purchased) * 100 : 0;
-                                const isCritical = pct < 10;
-                                return (
-                                    <div key={i} className="low-stock-item">
-                                        <div>
-                                            <div className="low-stock-name">{item.name}</div>
-                                            <div className="low-stock-qty">Balance: {fmt(item.balance)} {item.uom}</div>
-                                        </div>
-                                        <span className={`status-badge ${isCritical ? 'red' : 'amber'}`}>
-                                            {isCritical ? 'Critical' : 'Low'}
-                                        </span>
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* ── ROW 3: Raw Stock Table ── */}
-            <div className="card">
-                <div className="card-header">
-                    <div className="card-title">
-                        <span style={{
-                            background: '#dcfce7', color: '#16a34a',
-                            width: 28, height: 28, borderRadius: 8,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}>
-                            <Package size={15} />
-                        </span>
-                        Raw Material Stock Overview
-                    </div>
-                    <button className="view-all-btn" onClick={() => navigate('/raw-stock')}>
-                        Full Report <ArrowUpRight size={14} />
-                    </button>
-                </div>
-                <table className="data-table">
-                    <thead>
-                        <tr>
-                            <th>Raw Item</th>
-                            <th>Purchased</th>
-                            <th>Consumed</th>
-                            <th>Balance</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rawByItem.map((r, i) => {
-                            const pct = r.purchased > 0 ? (r.balance / r.purchased) * 100 : 0;
-                            const isLow = pct < 20;
-                            const isEmpty = r.balance <= 0;
-                            const color = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#22c55e';
-                            return (
-                                <tr key={i}>
-                                    <td style={{ fontWeight: 600 }}>{r.name}</td>
-                                    <td>{fmt(r.purchased)} {r.uom}</td>
-                                    <td style={{ color: r.consumed > 0 ? '#ef4444' : 'var(--muted)' }}>
-                                        {fmt(r.consumed)}
-                                    </td>
-                                    <td>
-                                        <span style={{ fontWeight: 700, color }}>
-                                            {fmt(r.balance)} {r.uom}
-                                        </span>
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                        {rawByItem.length === 0 && (
-                            <tr><td colSpan={4} className="empty-state">No raw material records.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* ── ROW 4: FG Stock Table ── */}
-            <div className="card">
-                <div className="card-header">
-                    <div className="card-title">
-                        <span style={{
-                            background: '#dbeafe', color: 'var(--blue)',
-                            width: 28, height: 28, borderRadius: 8,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}>
-                            <PackageSearch size={15} />
-                        </span>
-                        Finished Goods Stock Overview
-                    </div>
-                    <button className="view-all-btn" onClick={() => navigate('/fg-stock')}>
-                        Full Report <ArrowUpRight size={14} />
-                    </button>
-                </div>
-                <table className="data-table">
-                    <thead>
-                        <tr>
-                            <th>FG Item</th>
-                            <th>Packet Size</th>
-                            <th>Produced (Pkts)</th>
-                            <th>Sold (Pkts)</th>
-                            <th>Balance (Pkts)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {fgByItem.map((f, i) => {
-                            const pct = f.produced > 0 ? (f.balance / f.produced) * 100 : 0;
-                            const isLow = pct < 20;
-                            const isEmpty = f.balance <= 0;
-                            const color = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#22c55e';
-                            return (
-                                <tr key={i}>
-                                    <td style={{ fontWeight: 600 }}>{f.name}</td>
-                                    <td>{f.sizeLabel}</td>
-                                    <td>{fmt(f.produced)}</td>
-                                    <td style={{ color: f.sold > 0 ? '#ef4444' : 'var(--muted)' }}>
-                                        {fmt(f.sold)}
-                                    </td>
-                                    <td>
-                                        <span style={{ fontWeight: 700, color }}>
-                                            {fmt(f.balance)}
-                                        </span>
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                        {fgByItem.length === 0 && (
-                            <tr><td colSpan={5} className="empty-state">No finished goods records.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* ── ROW 5: Recent Sales ── */}
-            <div className="card">
-                <div className="card-header">
-                    <div className="card-title">
-                        <span style={{
-                            background: '#fce7f3', color: '#be185d',
-                            width: 28, height: 28, borderRadius: 8,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}>
-                            <TrendingUp size={15} />
-                        </span>
-                        Recent Sales
-                    </div>
-                    <button className="view-all-btn" onClick={() => navigate('/sales')}>
-                        View All <ChevronRight size={14} />
-                    </button>
-                </div>
-                <table className="data-table">
-                    <thead>
-                        <tr>
-                            <th>Bill #</th>
-                            <th>Customer</th>
-                            <th>Date</th>
-                            <th>Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {recentSales.map((s, i) => (
-                            <tr key={i}>
-                                <td><span className="purchase-po">{s.bill_no}</span></td>
-                                <td className="purchase-supplier">{s.customer_name}</td>
-                                <td style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-                                    {s.date ? new Date(s.date).toLocaleDateString('en-GB') : '—'}
-                                </td>
-                                <td className="purchase-amount">{fmtCur(s.total_amount)}</td>
-                            </tr>
-                        ))}
-                        {recentSales.length === 0 && (
-                            <tr><td colSpan={4} className="empty-state">No sales yet.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
+            )}
 
         </div>
     );

@@ -40,8 +40,8 @@ export default function Purchasing() {
     };
 
     const fetchLookups = async () => {
-        const { data: s } = await supabase.from('suppliers').select('id, name');
-        const { data: r } = await supabase.from('raw_items').select('id, name, uom');
+        const { data: s } = await supabase.from('suppliers').select('id, name').order('name');
+        const { data: r } = await supabase.from('raw_items').select('id, name, uom').order('name');
         if (s) setSuppliers(s);
         if (r) setRawItems(r);
     };

@@ -43,9 +43,9 @@ export default function Production() {
     };
 
     const fetchLookups = async () => {
-        const { data: f } = await supabase.from('fg_items').select('id, name, batch_code');
+        const { data: f } = await supabase.from('fg_items').select('id, name, batch_code').order('name');
         const { data: p } = await supabase.from('purchase_headers').select('id, purchase_no');
-        const { data: r } = await supabase.from('raw_items').select('id, name, uom');
+        const { data: r } = await supabase.from('raw_items').select('id, name, uom').order('name');
         const { data: pl } = await supabase.from('purchase_lines').select('purchase_header_id, raw_item_id');
         if (f) setFgItems(f);
         if (p) setPurchases(p);
@@ -105,12 +105,21 @@ export default function Production() {
         setDate(row.date);
         setMfd(row.mfd);
         setExp(row.exp);
-        setProdLines((row.production_lines || []).map(pl => ({
-            id: pl.id,
-            fg_item_id: pl.fg_item_id,
-            qty_per_packet: pl.qty_per_packet,
-            total_qty: pl.total_qty
-        })));
+        setProdLines((row.production_lines || []).map(pl => {
+            let q = Number(pl.qty_per_packet) || 0;
+            let unit = 'g';
+            if (q >= 1000 && q % 1000 === 0) {
+                q = q / 1000;
+                unit = 'kg';
+            }
+            return {
+                id: pl.id,
+                fg_item_id: pl.fg_item_id,
+                qty_per_packet: q,
+                qty_unit: unit,
+                total_qty: pl.total_qty
+            };
+        }));
         setConsumptions((row.production_consumptions || []).map(c => ({
             id: c.id,
             purchase_no: c.purchase_no,
@@ -175,7 +184,7 @@ export default function Production() {
 
     // ── FG LINES LOGIC ─────────────────────────────────────────────────────────
     const addProdLine = () => {
-        setProdLines([...prodLines, { id: Date.now(), fg_item_id: '', qty_per_packet: '', total_qty: '' }]);
+        setProdLines([...prodLines, { id: Date.now(), fg_item_id: '', qty_per_packet: '', qty_unit: 'g', total_qty: '' }]);
     };
 
     const updateProdLine = async (id, field, value) => {
@@ -214,11 +223,15 @@ export default function Production() {
             }
         }
 
-        const prodLinesPayload = prodLines.map(pl => ({
-            fg_item_id: pl.fg_item_id,
-            qty_per_packet: Number(pl.qty_per_packet),
-            total_qty: Number(pl.total_qty)
-        }));
+        const prodLinesPayload = prodLines.map(pl => {
+            let finalQty = Number(pl.qty_per_packet);
+            if (pl.qty_unit === 'kg') finalQty = finalQty * 1000;
+            return {
+                fg_item_id: pl.fg_item_id,
+                qty_per_packet: finalQty,
+                total_qty: Number(pl.total_qty)
+            };
+        });
 
         const consumptionPayload = consumptions.map(c => ({
             purchase_no: c.purchase_no,
@@ -428,15 +441,37 @@ export default function Production() {
                                                 </select>
                                             </td>
                                             <td>
-                                                <select className="form-group" style={{ marginBottom: 0 }} value={line.qty_per_packet} onChange={e => updateProdLine(line.id, 'qty_per_packet', e.target.value)} required>
-                                                    <option value="">Select Size</option>
-                                                    <option value="25">25g</option>
-                                                    <option value="50">50g</option>
-                                                    <option value="100">100g</option>
-                                                    <option value="250">250g</option>
-                                                    <option value="500">500g</option>
-                                                    <option value="1000">1kg</option>
-                                                </select>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <input
+                                                        className="form-group"
+                                                        style={{ marginBottom: 0, width: '90px' }}
+                                                        type="number"
+                                                        min="0.01"
+                                                        step="any"
+                                                        list="qty-options"
+                                                        value={line.qty_per_packet}
+                                                        onChange={e => updateProdLine(line.id, 'qty_per_packet', e.target.value)}
+                                                        placeholder="e.g. 50"
+                                                        required
+                                                    />
+                                                    <datalist id="qty-options">
+                                                        <option value="25" />
+                                                        <option value="50" />
+                                                        <option value="100" />
+                                                        <option value="250" />
+                                                        <option value="500" />
+                                                        <option value="1000" />
+                                                    </datalist>
+                                                    <select
+                                                        className="form-group"
+                                                        style={{ marginBottom: 0, width: '60px', padding: '0.3rem' }}
+                                                        value={line.qty_unit || 'g'}
+                                                        onChange={e => updateProdLine(line.id, 'qty_unit', e.target.value)}
+                                                    >
+                                                        <option value="g">g</option>
+                                                        <option value="kg">kg</option>
+                                                    </select>
+                                                </div>
                                             </td>
                                             <td>
                                                 <input className="form-group" style={{ marginBottom: 0 }} type="number" min="1" step="0.01" value={line.total_qty} onChange={e => updateProdLine(line.id, 'total_qty', e.target.value)} required />
