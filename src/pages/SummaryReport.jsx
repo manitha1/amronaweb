@@ -32,7 +32,8 @@ export default function SummaryReport() {
     const [fgItems, setFgItems] = useState({});
 
     useEffect(() => {
-        fetchLookups().then(() => fetchData());
+        fetchLookups().then(lookups => fetchData(lookups));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const fetchLookups = async () => {
@@ -46,9 +47,11 @@ export default function SummaryReport() {
         const fMap = {};
         (fg || []).forEach(f => fMap[f.id] = { name: f.name });
         setFgItems(fMap);
+
+        return { rMap, fMap };
     };
 
-    const fetchData = async () => {
+    const fetchData = async (lookups) => {
         setLoading(true);
 
         try {
@@ -129,12 +132,13 @@ export default function SummaryReport() {
             });
 
             // Flatten RAW Movements
+            const usedRawItems = lookups ? lookups.rMap : rawItems;
             const rawMovRows = Object.keys(rawMap).map(id => ({
                 id,
-                name: rawItems[id]?.name || 'Unknown',
+                name: usedRawItems[id]?.name || 'Unknown',
                 in: rawMap[id].in,
                 out: rawMap[id].out,
-                uom: rawItems[id]?.uom || ''
+                uom: usedRawItems[id]?.uom || ''
             })).sort((a, b) => a.name.localeCompare(b.name));
             setRawMovements(rawMovRows);
 
@@ -151,9 +155,10 @@ export default function SummaryReport() {
             });
 
             // Flatten FG Movements
+            const usedFgItems = lookups ? lookups.fMap : fgItems;
             const fgMovRows = Object.keys(fgMap).map(id => ({
                 id,
-                name: fgItems[id]?.name || 'Unknown',
+                name: usedFgItems[id]?.name || 'Unknown',
                 in: fgMap[id].in,
                 out: fgMap[id].out
             })).sort((a, b) => a.name.localeCompare(b.name));
