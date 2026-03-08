@@ -484,7 +484,7 @@ export default function Production() {
         <div className="modal-backdrop">
           <div
             className="modal-content"
-            style={{ maxWidth: "800px", maxHeight: "90vh", overflowY: "auto" }}
+            style={{ maxWidth: "1000px", maxHeight: "90vh", overflowY: "auto" }}
           >
             <div className="modal-header">
               <h3>

@@ -457,7 +457,7 @@ export default function Sales() {
       {/* ── CREATE / EDIT MODAL ── */}
       {isModalOpen && (
         <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "860px" }}>
+          <div className="modal-content" style={{ maxWidth: "1100px" }}>
             <div className="modal-header">
               <h3>
                 {editingId ? "Edit Sales Invoice" : "Create Sales Invoice"}
