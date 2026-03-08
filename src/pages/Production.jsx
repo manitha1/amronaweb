@@ -124,15 +124,25 @@ export default function Production() {
     setExp(row.exp);
     setProdLines(
       (row.production_lines || []).map((pl) => {
+        const isBulk = !pl.qty_per_packet;
         let q = Number(pl.total_qty) || 0;
         let unit = "g";
-        if (q >= 1000 && q % 1000 === 0) {
+        if (isBulk && q >= 1000 && q % 1000 === 0) {
           q = q / 1000;
           unit = "kg";
+        }
+        let size = pl.qty_per_packet || "";
+        let sUnit = "g";
+        if (size && size >= 1000 && size % 1000 === 0) {
+          size = size / 1000;
+          sUnit = "kg";
         }
         return {
           id: pl.id,
           fg_item_id: pl.fg_item_id,
+          variant_type: isBulk ? "bulk" : "packet",
+          qty_per_packet: size,
+          size_unit: sUnit,
           total_qty: q,
           qty_unit: unit,
         };
@@ -214,7 +224,15 @@ export default function Production() {
   const addProdLine = () => {
     setProdLines([
       ...prodLines,
-      { id: Date.now(), fg_item_id: "", total_qty: "", qty_unit: "kg" },
+      {
+        id: Date.now(),
+        fg_item_id: "",
+        variant_type: "bulk",
+        qty_per_packet: "",
+        size_unit: "g",
+        total_qty: "",
+        qty_unit: "kg",
+      },
     ]);
   };
 
@@ -265,10 +283,18 @@ export default function Production() {
 
     const prodLinesPayload = prodLines.map((pl) => {
       let finalQty = Number(pl.total_qty);
-      if (pl.qty_unit === "kg") finalQty = finalQty * 1000;
+      if (pl.variant_type === "bulk" && pl.qty_unit === "kg") {
+        finalQty = finalQty * 1000;
+      }
+      let pSize =
+        pl.variant_type === "packet" ? Number(pl.qty_per_packet) : null;
+      if (pl.variant_type === "packet" && pl.size_unit === "kg") {
+        pSize = pSize * 1000;
+      }
       return {
         fg_item_id: pl.fg_item_id,
         total_qty: finalQty,
+        qty_per_packet: pSize,
       };
     });
 
@@ -408,7 +434,9 @@ export default function Production() {
                       {(row.production_lines || []).map((pl, i) => (
                         <span key={pl.id} style={{ fontSize: "0.85rem" }}>
                           • {pl.fg_items?.name}:{" "}
-                          {formatPacketSize(pl.total_qty)}
+                          {pl.qty_per_packet
+                            ? `${pl.total_qty} pkts (${formatPacketSize(pl.qty_per_packet)})`
+                            : `Bulk - ${formatPacketSize(pl.total_qty)}`}
                         </span>
                       ))}
                     </div>
@@ -546,7 +574,8 @@ export default function Production() {
                 <thead>
                   <tr>
                     <th>Finished Good Item</th>
-                    <th>Total Weight Produced</th>
+                    <th>Variant</th>
+                    <th>Quantity Produced</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -576,6 +605,80 @@ export default function Production() {
                         </select>
                       </td>
                       <td>
+                        <select
+                          className="form-group"
+                          style={{ marginBottom: 0 }}
+                          value={line.variant_type}
+                          onChange={(e) =>
+                            updateProdLine(
+                              line.id,
+                              "variant_type",
+                              e.target.value,
+                            )
+                          }
+                        >
+                          <option value="bulk">Bulk weight</option>
+                          <option value="packet">Packets</option>
+                        </select>
+                        {line.variant_type === "packet" && (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              marginTop: "4px",
+                            }}
+                          >
+                            <input
+                              className="form-group"
+                              style={{
+                                marginBottom: 0,
+                                width: "80px",
+                                padding: "0.3rem",
+                              }}
+                              type="number"
+                              min="0.1"
+                              step="any"
+                              value={line.qty_per_packet}
+                              onChange={(e) =>
+                                updateProdLine(
+                                  line.id,
+                                  "qty_per_packet",
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Size"
+                              required
+                            />
+                            <span
+                              style={{ fontSize: "0.8rem", color: "#64748b" }}
+                            >
+                              <select
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  fontSize: "inherit",
+                                  color: "inherit",
+                                  padding: 0,
+                                  cursor: "pointer",
+                                }}
+                                value={line.size_unit || "g"}
+                                onChange={(e) =>
+                                  updateProdLine(
+                                    line.id,
+                                    "size_unit",
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                <option value="g">g</option>
+                                <option value="kg">kg</option>
+                              </select>
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td>
                         <div
                           style={{
                             display: "flex",
@@ -597,28 +700,41 @@ export default function Production() {
                                 e.target.value,
                               )
                             }
-                            placeholder="e.g. 100"
+                            placeholder={
+                              line.variant_type === "packet"
+                                ? "No. of pkts"
+                                : "e.g. 100"
+                            }
                             required
                           />
-                          <select
-                            className="form-group"
-                            style={{
-                              marginBottom: 0,
-                              width: "60px",
-                              padding: "0.3rem",
-                            }}
-                            value={line.qty_unit || "kg"}
-                            onChange={(e) =>
-                              updateProdLine(
-                                line.id,
-                                "qty_unit",
-                                e.target.value,
-                              )
-                            }
-                          >
-                            <option value="g">g</option>
-                            <option value="kg">kg</option>
-                          </select>
+                          {line.variant_type === "bulk" && (
+                            <select
+                              className="form-group"
+                              style={{
+                                marginBottom: 0,
+                                width: "60px",
+                                padding: "0.3rem",
+                              }}
+                              value={line.qty_unit || "kg"}
+                              onChange={(e) =>
+                                updateProdLine(
+                                  line.id,
+                                  "qty_unit",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="g">g</option>
+                              <option value="kg">kg</option>
+                            </select>
+                          )}
+                          {line.variant_type === "packet" && (
+                            <span
+                              style={{ fontSize: "0.85rem", color: "#64748b" }}
+                            >
+                              pkts
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -926,7 +1042,11 @@ export default function Production() {
                       <td>
                         <strong>{pl.fg_items?.name}</strong>
                       </td>
-                      <td>{formatPacketSize(pl.total_qty)}</td>
+                      <td>
+                        {pl.qty_per_packet
+                          ? `${pl.total_qty} pkts (${formatPacketSize(pl.qty_per_packet)})`
+                          : `Bulk - ${formatPacketSize(pl.total_qty)}`}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

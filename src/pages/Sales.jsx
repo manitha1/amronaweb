@@ -46,7 +46,7 @@ export default function Sales() {
       .from("production_lines")
       .select(
         `
-                id, fg_item_id, total_qty,
+                id, fg_item_id, total_qty, qty_per_packet,
                 production_headers(id, batch_no, date),
                 fg_items(name, batch_code)
             `,
@@ -100,19 +100,28 @@ export default function Sales() {
     setBillNo(row.bill_no);
     setCustomerId(row.customer_id);
     setDate(row.date);
-    setLines(
-      (row.sales_lines || []).map((l) => ({
+    const parsedLines = (row.sales_lines || []).map((l) => {
+      let size = l.packet_size || "";
+      let sUnit = "g";
+      if (size && size >= 1000 && size % 1000 === 0) {
+        size = size / 1000;
+        sUnit = "kg";
+      }
+      return {
         id: l.id,
         batch_id: l.production_header_id || "",
-        prod_line_id: "", // since old rows won't easily map back if we only know batch_id + fg_item_id, we just keep batch_id for edit mode display
+        prod_line_id: "",
         fg_item_id: l.fg_item_id,
         fg_item_name: l.fg_items?.name,
-        packet_size: l.packet_size || "",
+        is_bulk: !l.packet_size && !l.production_headers?.id,
+        packet_size: size,
+        size_unit: sUnit,
         qty: l.qty,
         unit_price: l.unit_price,
         availableQty: null,
-      })),
-    );
+      };
+    });
+    setLines(parsedLines);
     setIsModalOpen(true);
   };
 
@@ -129,7 +138,9 @@ export default function Sales() {
         batch_id: "",
         prod_line_id: "",
         fg_item_name: "",
+        is_bulk: false,
         packet_size: "",
+        size_unit: "g",
         availableQty: null,
         qty: 1,
         unit_price: 0,
@@ -162,7 +173,9 @@ export default function Sales() {
         batch_id: "",
         fg_item_id: "",
         fg_item_name: "",
+        is_bulk: false,
         packet_size: "",
+        size_unit: "g",
         qty: "",
         unit_price: "",
         availableQty: null,
@@ -193,21 +206,14 @@ export default function Sales() {
 
     const { data: soldRows } = await supabase
       .from("sales_lines")
-      .select("qty, packet_size")
-      .eq("fg_item_id", batchLine.fg_item_id)
-      .eq("production_header_id", batchLine.production_headers?.id);
+      .select("qty")
+      .eq("production_line_id", prodLineId);
 
-    const totalSoldGrams = soldRows
-      ? soldRows.reduce(
-          (s, r) => s + Number(r.qty) * Number(r.packet_size || 1),
-          0,
-        )
+    const totalSoldUnits = soldRows
+      ? soldRows.reduce((s, r) => s + Number(r.qty), 0)
       : 0;
-    const batchGrams = Number(batchLine.total_qty);
-    const availableGrams = Math.max(
-      0,
-      Math.min(batchGrams, batchGrams - totalSoldGrams),
-    );
+    const batchUnits = Number(batchLine.total_qty);
+    const availableUnits = Math.max(0, batchUnits - totalSoldUnits);
 
     setLines(
       lines.map((l) =>
@@ -218,8 +224,10 @@ export default function Sales() {
               batch_id: batchLine.production_headers?.id,
               fg_item_id: batchLine.fg_item_id,
               fg_item_name: batchLine.fg_items?.name,
-              packet_size: "",
-              availableQty: availableGrams,
+              is_bulk: !batchLine.qty_per_packet,
+              packet_size: batchLine.qty_per_packet || "",
+              size_unit: "g",
+              availableQty: availableUnits,
             }
           : l,
       ),
@@ -254,26 +262,41 @@ export default function Sales() {
     if (lines.length === 0) return toast.error("Add at least one item line");
 
     for (const l of lines) {
-      if (
-        !l.fg_item_id ||
-        l.qty <= 0 ||
-        l.packet_size <= 0 ||
-        l.unit_price < 0
-      ) {
+      if (!l.fg_item_id || l.qty <= 0 || l.unit_price < 0) {
+        return toast.error("Please fill all lines correctly");
+      }
+      if (l.is_bulk && !l.packet_size) {
         return toast.error(
-          "Please fill all lines correctly including packet size",
+          "Please specify a packet size (in grams) for bulk items being sold as packets.",
+        );
+      }
+
+      let pSize = l.packet_size ? Number(l.packet_size) : 0;
+      if (l.is_bulk && l.size_unit === "kg") pSize = pSize * 1000;
+
+      const totalGramsNeeded = l.is_bulk
+        ? Number(l.qty) * pSize
+        : Number(l.qty);
+      if (totalGramsNeeded > l.availableQty) {
+        return toast.error(
+          `Not enough stock for ${l.fg_item_name}. Needed: ${totalGramsNeeded}, Available: ${l.availableQty}`,
         );
       }
     }
 
-    const linePayload = lines.map((l) => ({
-      fg_item_id: l.fg_item_id,
-      qty: Number(l.qty),
-      packet_size: Number(l.packet_size),
-      unit_price: Number(l.unit_price),
-      production_header_id: l.batch_id || null,
-      production_line_id: l.prod_line_id || null,
-    }));
+    const linePayload = lines.map((l) => {
+      let pSize = l.packet_size ? Number(l.packet_size) : null;
+      if (l.is_bulk && l.size_unit === "kg" && pSize) pSize = pSize * 1000;
+
+      return {
+        fg_item_id: l.fg_item_id,
+        qty: Number(l.qty),
+        packet_size: pSize,
+        unit_price: Number(l.unit_price),
+        production_header_id: l.batch_id || null,
+        production_line_id: l.prod_line_id || null,
+      };
+    });
 
     if (editingId) {
       const payload = {
@@ -544,7 +567,11 @@ export default function Sales() {
                               {b.fg_items?.batch_code
                                 ? `[${b.fg_items.batch_code}]`
                                 : ""}{" "}
-                              ({formatPacketSize(b.total_qty)})
+                              (
+                              {b.qty_per_packet
+                                ? `${b.total_qty} pkts of ${formatPacketSize(b.qty_per_packet)}`
+                                : `Bulk ${formatPacketSize(b.total_qty)}`}
+                              )
                             </option>
                           ))}
                         </select>
@@ -572,22 +599,66 @@ export default function Sales() {
                         >
                           <input
                             className="form-group"
-                            style={{ marginBottom: 0, width: "90px" }}
-                            type="number"
-                            min="0.1"
+                            style={{
+                              marginBottom: 0,
+                              width: "90px",
+                              ...(line.is_bulk
+                                ? {}
+                                : {
+                                    backgroundColor: "#f8fafc",
+                                    cursor: "not-allowed",
+                                  }),
+                            }}
+                            type={line.is_bulk ? "number" : "text"}
+                            min={line.is_bulk ? "0.1" : undefined}
                             step="any"
-                            value={line.packet_size}
-                            onChange={(e) =>
-                              updateLine(line.id, "packet_size", e.target.value)
+                            value={
+                              line.is_bulk
+                                ? line.packet_size
+                                : line.packet_size
+                                  ? formatPacketSize(line.packet_size)
+                                  : ""
                             }
-                            placeholder="e.g. 50"
+                            onChange={(e) => {
+                              if (line.is_bulk) {
+                                updateLine(
+                                  line.id,
+                                  "packet_size",
+                                  e.target.value,
+                                );
+                              }
+                            }}
+                            readOnly={!line.is_bulk}
+                            placeholder={line.is_bulk ? "e.g. 50" : ""}
                             required
                           />
-                          <span
-                            style={{ fontSize: "0.85rem", color: "#64748b" }}
-                          >
-                            g
-                          </span>
+                          {line.is_bulk && (
+                            <span
+                              style={{ fontSize: "0.85rem", color: "#64748b" }}
+                            >
+                              <select
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  fontSize: "inherit",
+                                  color: "inherit",
+                                  padding: 0,
+                                  cursor: "pointer",
+                                }}
+                                value={line.size_unit || "g"}
+                                onChange={(e) =>
+                                  updateLine(
+                                    line.id,
+                                    "size_unit",
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                <option value="g">g</option>
+                                <option value="kg">kg</option>
+                              </select>
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -602,8 +673,8 @@ export default function Sales() {
                             className="form-group"
                             style={{ marginBottom: 0, width: "90px" }}
                             type="number"
-                            min="1"
-                            step="1"
+                            min="0.1"
+                            step="any"
                             value={line.qty}
                             onChange={(e) =>
                               updateLine(line.id, "qty", e.target.value)
@@ -632,7 +703,25 @@ export default function Sales() {
                                       : "#16a34a",
                               }}
                             >
-                              In stock: {formatPacketSize(line.availableQty)}
+                              In stock:{" "}
+                              {line.is_bulk
+                                ? formatPacketSize(line.availableQty)
+                                : `${line.availableQty} pkts`}
+                              {line.is_bulk && line.packet_size && line.qty && (
+                                <span
+                                  style={{
+                                    marginLeft: "4px",
+                                    fontStyle: "italic",
+                                    fontWeight: "normal",
+                                  }}
+                                >
+                                  (Needs{" "}
+                                  {formatPacketSize(
+                                    Number(line.qty) * Number(line.packet_size),
+                                  )}
+                                  )
+                                </span>
+                              )}
                             </span>
                           )}
                         </div>
@@ -814,7 +903,9 @@ export default function Sales() {
                       </td>
                       <td>{l.fg_items?.name}</td>
                       <td>
-                        {l.packet_size ? formatPacketSize(l.packet_size) : "—"}
+                        {l.packet_size
+                          ? formatPacketSize(l.packet_size)
+                          : "Bulk"}
                       </td>
                       <td>{Number(l.qty).toFixed(0)}</td>
                       <td>LKR {Number(l.unit_price).toFixed(2)}</td>
@@ -911,7 +1002,7 @@ export default function Sales() {
                     </td>
                     <td>
                       {l
-                        ? `${l.fg_items?.name} ${l.packet_size ? formatPacketSize(l.packet_size) : ""}`
+                        ? `${l.fg_items?.name} ${l.packet_size ? formatPacketSize(l.packet_size) : "(Bulk)"}`
                         : ""}
                     </td>
                     <td className="num">

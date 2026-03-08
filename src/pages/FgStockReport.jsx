@@ -24,41 +24,67 @@ export default function FgStockReport() {
     const { data: prodLines } = await supabase
       .from("production_lines")
       .select(
-        "id, fg_item_id, total_qty, production_header_id, fg_items(name, batch_code), production_headers(batch_no, date)",
+        "id, fg_item_id, total_qty, qty_per_packet, production_header_id, fg_items(name, batch_code), production_headers(batch_no, date)",
       );
 
     const { data: salesLines } = await supabase
       .from("sales_lines")
-      .select("fg_item_id, qty, packet_size, production_header_id");
-
-    const soldByBatch = {};
-    const soldByFgItem = {};
-    (salesLines || []).forEach((sl) => {
-      const grams = Number(sl.qty) * Number(sl.packet_size || 1);
-      if (sl.production_header_id) {
-        soldByBatch[sl.production_header_id] =
-          (soldByBatch[sl.production_header_id] || 0) + grams;
-      } else {
-        soldByFgItem[sl.fg_item_id] =
-          (soldByFgItem[sl.fg_item_id] || 0) + grams;
-      }
-    });
+      .select(
+        "fg_item_id, qty, packet_size, production_header_id, production_line_id",
+      );
 
     const tableRows = (prodLines || []).map((pl) => {
       const produced = Number(pl.total_qty);
-      const sold =
-        soldByBatch[pl.production_header_id] ||
-        soldByFgItem[pl.fg_item_id] ||
-        0;
+      const isBulk = !pl.qty_per_packet;
+
+      let sold = 0;
+      (salesLines || []).forEach((sl) => {
+        if (sl.production_line_id === pl.id) {
+          sold +=
+            isBulk && sl.packet_size
+              ? Number(sl.qty) * Number(sl.packet_size)
+              : Number(sl.qty);
+        } else if (
+          !sl.production_line_id &&
+          sl.production_header_id === pl.production_header_id &&
+          sl.fg_item_id === pl.fg_item_id
+        ) {
+          const slIsBulkSale = !sl.packet_size;
+          if (isBulk && slIsBulkSale) {
+            sold += Number(sl.qty);
+          } else if (
+            !isBulk &&
+            !slIsBulkSale &&
+            Number(sl.packet_size) === Number(pl.qty_per_packet)
+          ) {
+            sold += Number(sl.qty);
+          } else if (isBulk && !slIsBulkSale) {
+            sold += Number(sl.qty) * Number(sl.packet_size);
+          }
+        }
+      });
       const remaining = Math.max(0, produced - sold);
+
       return {
         batch_no: pl.production_headers?.batch_no || "—",
         date: pl.production_headers?.date,
         product: pl.fg_items?.name || "—",
         batch_code: pl.fg_items?.batch_code || "",
+        variant: pl.qty_per_packet
+          ? `${formatPacketSize(pl.qty_per_packet)} pkts`
+          : "Bulk",
         produced,
         total_sold: sold,
         remaining,
+        producedDisplay: pl.qty_per_packet
+          ? `${produced} pkts`
+          : formatPacketSize(produced),
+        soldDisplay: pl.qty_per_packet
+          ? `${sold} pkts`
+          : formatPacketSize(sold),
+        remainingDisplay: pl.qty_per_packet
+          ? `${remaining} pkts`
+          : formatPacketSize(remaining),
       };
     });
 
@@ -95,9 +121,10 @@ export default function FgStockReport() {
                 <th>Batch No</th>
                 <th>Date</th>
                 <th>Product</th>
-                <th>Weight Produced</th>
-                <th>Weight Sold</th>
-                <th>Stock Remaining</th>
+                <th>Variant</th>
+                <th>Produced</th>
+                <th>Sold</th>
+                <th>Remaining</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -145,13 +172,14 @@ export default function FgStockReport() {
                         </div>
                       )}
                     </td>
-                    <td>{formatPacketSize(r.produced)}</td>
+                    <td>{r.variant}</td>
+                    <td>{r.producedDisplay}</td>
                     <td
                       style={{
                         color: r.total_sold > 0 ? "#dc2626" : "#64748b",
                       }}
                     >
-                      {formatPacketSize(r.total_sold)}
+                      {r.soldDisplay}
                     </td>
                     <td>
                       <span
@@ -164,7 +192,7 @@ export default function FgStockReport() {
                               : "#16a34a",
                         }}
                       >
-                        {formatPacketSize(r.remaining)}
+                        {r.remainingDisplay}
                       </span>
                     </td>
                     <td>

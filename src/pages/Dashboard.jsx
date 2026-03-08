@@ -74,7 +74,7 @@ export default function Dashboard() {
       { data: batches },
     ] = await Promise.all([
       supabase.from("raw_stock_view").select("balance"),
-      supabase.from("fg_stock_view").select("balance"),
+      supabase.from("fg_stock_view").select("balance, packet_size"),
       supabase
         .from("sales_headers")
         .select("total_amount")
@@ -86,7 +86,10 @@ export default function Dashboard() {
       (rawView || []).reduce((s, r) => s + Number(r.balance || 0), 0),
     );
     setFgBalance(
-      (fgView || []).reduce((s, r) => s + Number(r.balance || 0), 0),
+      (fgView || []).reduce(
+        (s, r) => s + Number(r.balance || 0) * Number(r.packet_size || 1),
+        0,
+      ),
     );
     setTotalSales(
       (sales || []).reduce((s, r) => s + Number(r.total_amount || 0), 0),
@@ -150,51 +153,35 @@ export default function Dashboard() {
   };
 
   const fetchFgByItem = async () => {
-    const { data: prodLines } = await supabase
-      .from("production_lines")
-      .select("fg_item_id, total_qty, fg_items(name, uom)");
+    const { data: stockView } = await supabase
+      .from("fg_stock_view")
+      .select(
+        "fg_item_id, fg_item_name, packet_size, total_in, total_out, balance",
+      );
 
-    const { data: salesLines } = await supabase
-      .from("sales_lines")
-      .select("fg_item_id, qty, packet_size, fg_items(name, uom)");
-
-    const groupedMap = {};
-
-    (prodLines || []).forEach((pl) => {
-      const key = pl.fg_item_id;
-      if (!groupedMap[key]) {
-        groupedMap[key] = {
-          name: pl.fg_items?.name || "—",
-          uom: pl.fg_items?.uom || "",
-          produced: 0,
-          sold: 0,
-        };
-      }
-      groupedMap[key].produced += Number(pl.total_qty);
+    // Fetch UOMs separately since they are in fg_items
+    const { data: fgItems } = await supabase.from("fg_items").select("id, uom");
+    const uomMap = {};
+    (fgItems || []).forEach((item) => {
+      uomMap[item.id] = item.uom;
     });
 
-    (salesLines || []).forEach((sl) => {
-      const key = sl.fg_item_id;
-      if (!groupedMap[key]) {
-        groupedMap[key] = {
-          name: sl.fg_items?.name || "(Item ID: " + sl.fg_item_id + ")",
-          uom: sl.fg_items?.uom || "",
-          produced: 0,
-          sold: 0,
+    const rows = (stockView || [])
+      .filter((row) => Number(row.total_in) > 0)
+      .map((row) => {
+        const isPacket = !!row.packet_size;
+        return {
+          name: row.fg_item_name || "(Unknown)",
+          variant: isPacket
+            ? `${formatPacketSize(row.packet_size)} pkts`
+            : "Bulk",
+          isPacket,
+          uom: uomMap[row.fg_item_id] || "",
+          produced: Number(row.total_in),
+          sold: Number(row.total_out),
+          balance: Number(row.balance),
         };
-      }
-      const grams = Number(sl.qty) * Number(sl.packet_size || 1);
-      groupedMap[key].sold += grams;
-    });
-
-    const rows = Object.values(groupedMap)
-      .map((g) => ({
-        name: g.name,
-        uom: g.uom,
-        produced: g.produced,
-        sold: g.sold,
-        balance: Math.max(0, g.produced - g.sold),
-      }))
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
     setFgByItem(rows);
@@ -585,8 +572,9 @@ export default function Dashboard() {
                 <thead>
                   <tr>
                     <th>FG Item</th>
-                    <th>Weight Produced</th>
-                    <th>Weight Sold</th>
+                    <th>Variant</th>
+                    <th>Produced</th>
+                    <th>Sold</th>
                     <th>Balance</th>
                   </tr>
                 </thead>
@@ -604,17 +592,28 @@ export default function Dashboard() {
                     return (
                       <tr key={i}>
                         <td style={{ fontWeight: 600 }}>{f.name}</td>
-                        <td>{formatPacketSize(f.produced)}</td>
+                        <td style={{ color: "#64748b", fontSize: "0.85rem" }}>
+                          {f.variant}
+                        </td>
+                        <td>
+                          {f.isPacket
+                            ? `${f.produced} pkts`
+                            : formatPacketSize(f.produced)}
+                        </td>
                         <td
                           style={{
                             color: f.sold > 0 ? "#ef4444" : "var(--muted)",
                           }}
                         >
-                          {formatPacketSize(f.sold)}
+                          {f.isPacket
+                            ? `${f.sold} pkts`
+                            : formatPacketSize(f.sold)}
                         </td>
                         <td>
                           <span style={{ fontWeight: 700, color }}>
-                            {formatPacketSize(f.balance)}
+                            {f.isPacket
+                              ? `${f.balance} pkts`
+                              : formatPacketSize(f.balance)}
                           </span>
                         </td>
                       </tr>
