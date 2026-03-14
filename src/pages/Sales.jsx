@@ -206,14 +206,21 @@ export default function Sales() {
 
     const { data: soldRows } = await supabase
       .from("sales_lines")
-      .select("qty")
+      .select("qty, packet_size")
       .eq("production_line_id", prodLineId);
 
-    const totalSoldUnits = soldRows
-      ? soldRows.reduce((s, r) => s + Number(r.qty), 0)
+    const isBulk = !batchLine.qty_per_packet;
+    const totalSoldConsumed = soldRows
+      ? soldRows.reduce((s, r) => {
+          const v = isBulk
+            ? Number(r.qty) * (r.packet_size || 0)
+            : Number(r.qty);
+          return s + v;
+        }, 0)
       : 0;
-    const batchUnits = Number(batchLine.total_qty);
-    const availableUnits = Math.max(0, batchUnits - totalSoldUnits);
+
+    const batchCapacity = Number(batchLine.total_qty);
+    const availableUnits = Math.max(0, batchCapacity - totalSoldConsumed);
 
     setLines(
       lines.map((l) =>

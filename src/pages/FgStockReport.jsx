@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../supabase";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
+import toast from "react-hot-toast";
 
 export default function FgStockReport() {
   const [rows, setRows] = useState([]);
@@ -24,7 +25,7 @@ export default function FgStockReport() {
     const { data: prodLines } = await supabase
       .from("production_lines")
       .select(
-        "id, fg_item_id, total_qty, qty_per_packet, production_header_id, fg_items(name, batch_code), production_headers(batch_no, date)",
+        "id, fg_item_id, total_qty, qty_per_packet, production_header_id, is_verified, fg_items(name, batch_code), production_headers(batch_no, date)",
       );
 
     const { data: salesLines } = await supabase
@@ -85,6 +86,8 @@ export default function FgStockReport() {
         remainingDisplay: pl.qty_per_packet
           ? `${remaining} pkts`
           : formatPacketSize(remaining),
+        is_verified: pl.is_verified || false,
+        id: pl.id,
       };
     });
 
@@ -93,6 +96,25 @@ export default function FgStockReport() {
 
     setRows(tableRows);
     setLoading(false);
+  };
+
+  const toggleVerify = async (id, currentStatus) => {
+    const { error } = await supabase
+      .from("production_lines")
+      .update({ is_verified: !currentStatus })
+      .eq("id", id);
+
+    if (error) {
+      toast.error("Failed to update status: " + error.message);
+    } else {
+      toast.success(!currentStatus ? "Marked as verified" : "Removed verification");
+      // Update local state for immediate feedback
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === id ? { ...row, is_verified: !currentStatus } : row
+        )
+      );
+    }
   };
 
   return (
@@ -126,6 +148,7 @@ export default function FgStockReport() {
                 <th>Sold</th>
                 <th>Remaining</th>
                 <th>Status</th>
+                <th style={{ textAlign: "center" }}>Verified</th>
               </tr>
             </thead>
             <tbody>
@@ -209,6 +232,25 @@ export default function FgStockReport() {
                       >
                         {statusLabel}
                       </span>
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        onClick={() => toggleVerify(r.id, r.is_verified)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: r.is_verified ? "#16a34a" : "#e2e8f0",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          margin: "0 auto",
+                          transition: "color 0.2s",
+                        }}
+                        title={r.is_verified ? "Verified" : "Click to Verify"}
+                      >
+                        <CheckCircle size={20} fill={r.is_verified ? "rgba(22, 163, 74, 0.1)" : "transparent"} />
+                      </button>
                     </td>
                   </tr>
                 );

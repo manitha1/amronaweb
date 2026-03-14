@@ -9,6 +9,8 @@ import {
   TrendingUp,
   AlertTriangle,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   ArrowUpRight,
   Printer,
 } from "lucide-react";
@@ -30,14 +32,20 @@ export default function Dashboard() {
   const [totalSales, setTotalSales] = useState(0);
   const [activeBatches, setActiveBatches] = useState(0);
 
+  // New Summary numbers
+  const [rawStockValue, setRawStockValue] = useState(0);
+  const [currentMonthConsumedValue, setCurrentMonthConsumedValue] = useState(0);
+
   // Table data
-  const [recentPurchases, setRecentPurchases] = useState([]);
-  const [recentSales, setRecentSales] = useState([]);
   const [rawByItem, setRawByItem] = useState([]);
   const [fgByItem, setFgByItem] = useState([]);
 
   // Print State
   const [printingRawStock, setPrintingRawStock] = useState(false);
+
+  // Toggle States for Tables
+  const [showRawStock, setShowRawStock] = useState(true);
+  const [showFgStock, setShowFgStock] = useState(true);
 
   useEffect(() => {
     fetchAll();
@@ -48,8 +56,6 @@ export default function Dashboard() {
     try {
       await Promise.all([
         fetchStockSummary(),
-        fetchRecentPurchases(),
-        fetchRecentSales(),
         fetchRawByItem(),
         fetchFgByItem(),
       ]);
@@ -67,11 +73,16 @@ export default function Dashboard() {
       .toISOString()
       .slice(0, 10);
 
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
     const [
       { data: rawView },
       { data: fgView },
       { data: sales },
       { data: batches },
+      { data: purchaseLines },
+      { data: consumptions }
     ] = await Promise.all([
       supabase.from("raw_stock_view").select("balance"),
       supabase.from("fg_stock_view").select("balance, packet_size"),
@@ -81,6 +92,8 @@ export default function Dashboard() {
         .gte("date", monthStart)
         .lte("date", monthEnd),
       supabase.from("production_headers").select("batch_no"),
+      supabase.from("purchase_lines").select("purchase_header_id, raw_item_id, qty, unit_cost"),
+      supabase.from("production_consumptions").select("purchase_no, raw_item_id, qty, production_headers!inner(date)")
     ]);
     setRawBalance(
       (rawView || []).reduce((s, r) => s + Number(r.balance || 0), 0),
@@ -95,28 +108,40 @@ export default function Dashboard() {
       (sales || []).reduce((s, r) => s + Number(r.total_amount || 0), 0),
     );
     setActiveBatches((batches || []).length);
-  };
 
-  const fetchRecentPurchases = async () => {
-    const { data } = await supabase
-      .from("purchase_headers")
-      .select("purchase_no, date, total_amount, suppliers(name)")
-      .order("date", { ascending: false })
-      .limit(5);
-    setRecentPurchases(
-      (data || []).map((p) => ({ ...p, supplier_name: p.suppliers?.name })),
-    );
-  };
+    let stockVal = 0;
+    let consumedVal = 0;
+    const consumedMap = {};
 
-  const fetchRecentSales = async () => {
-    const { data } = await supabase
-      .from("sales_headers")
-      .select("bill_no, date, total_amount, customers(name)")
-      .order("date", { ascending: false })
-      .limit(5);
-    setRecentSales(
-      (data || []).map((s) => ({ ...s, customer_name: s.customers?.name })),
-    );
+    for (const c of consumptions || []) {
+      const key = c.purchase_no + "_" + c.raw_item_id;
+      consumedMap[key] = (consumedMap[key] || 0) + Number(c.qty);
+
+      // Check if consumed in current month
+      if (c.production_headers && c.production_headers.date) {
+        const prodDate = new Date(c.production_headers.date);
+        if (prodDate.getMonth() === currentMonth && prodDate.getFullYear() === currentYear) {
+          const pl = (purchaseLines || []).find(
+            (p) => p.purchase_header_id === c.purchase_no && p.raw_item_id === c.raw_item_id
+          );
+          if (pl) {
+            consumedVal += (Number(c.qty) * Number(pl.unit_cost));
+          }
+        }
+      }
+    }
+
+    for (const pl of purchaseLines || []) {
+      const key = pl.purchase_header_id + "_" + pl.raw_item_id;
+      const consumed = consumedMap[key] || 0;
+      const remaining = Number(pl.qty) - consumed;
+      if (remaining > 0) {
+        stockVal += (remaining * Number(pl.unit_cost));
+      }
+    }
+
+    setRawStockValue(stockVal);
+    setCurrentMonthConsumedValue(consumedVal);
   };
 
   const fetchRawByItem = async () => {
@@ -212,11 +237,63 @@ export default function Dashboard() {
     return () => window.removeEventListener("afterprint", afterPrint);
   }, []);
 
-  // Low stock items: balance < 20% of purchased
-  const lowStockRaw = rawByItem.filter((r) => {
-    const pct = r.purchased > 0 ? (r.balance / r.purchased) * 100 : 0;
-    return pct < 20;
-  });
+  useEffect(() => {
+    const afterPrint = () => setPrintingRawStock(false);
+    window.addEventListener("afterprint", afterPrint);
+    return () => window.removeEventListener("afterprint", afterPrint);
+  }, []);
+
+  // Low stock items: balance < 20% of purchased for raw, balance < 20% of produced for FG
+  const getLowStockAlerts = () => {
+    const combinedMap = {};
+
+    // 1. Process Raw Materials
+    rawByItem.forEach((r) => {
+      if (r.name && r.name !== '—') {
+        combinedMap[r.name.toLowerCase()] = {
+          name: r.name,
+          balance: r.balance,
+          uom: r.uom,
+          purchased: r.purchased,
+        };
+      }
+    });
+
+    // 2. Process Finished Goods and merge if name matches
+    fgByItem.forEach((f) => {
+      if (f.name && f.name !== '(Unknown)') {
+        const key = f.name.toLowerCase();
+        
+        if (combinedMap[key]) {
+          combinedMap[key].balance += f.balance;
+          combinedMap[key].purchased += f.produced; 
+        } else {
+          combinedMap[key] = {
+            name: f.name,
+            balance: f.balance,
+            uom: f.uom || (f.isPacket ? 'pkts' : 'Kg'),
+            purchased: f.produced,
+          };
+        }
+      }
+    });
+
+    // 3. Filter for low stock (< 20% of combined purchased/produced)
+    const alerts = [];
+    Object.values(combinedMap).forEach(item => {
+      const pct = item.purchased > 0 ? (item.balance / item.purchased) * 100 : 0;
+      if (pct < 20) {
+        alerts.push({
+          ...item,
+          isCritical: pct < 10
+        });
+      }
+    });
+
+    return alerts;
+  };
+
+  const lowStockCombined = getLowStockAlerts();
 
   if (loading)
     return (
@@ -267,24 +344,22 @@ export default function Dashboard() {
               <div className="stat-card-icon">
                 <Package size={52} />
               </div>
-              <div className="stat-card-label">Raw Materials Stock</div>
-              <div className="stat-card-value">
-                {fmt(rawBalance)}
-                <span className="stat-card-unit">Kg</span>
+              <div className="stat-card-label">Raw Materials Stock Value</div>
+              <div className="stat-card-value" style={{ fontSize: "1.75rem" }}>
+                {fmtCur(rawStockValue)}
               </div>
-              <div className="stat-card-sub">Balance from stock ledger</div>
+              <div className="stat-card-sub">Total price of raw material in stock</div>
             </div>
 
             <div className="stat-card orange">
               <div className="stat-card-icon">
                 <Factory size={52} />
               </div>
-              <div className="stat-card-label">Production Batches</div>
-              <div className="stat-card-value">
-                {activeBatches}
-                <span className="stat-card-unit">Batches</span>
+              <div className="stat-card-label">RM Consumed Value</div>
+              <div className="stat-card-value" style={{ fontSize: "1.75rem" }}>
+                {fmtCur(currentMonthConsumedValue)}
               </div>
-              <div className="stat-card-sub">Total production runs</div>
+              <div className="stat-card-sub">Consumed in current month</div>
             </div>
 
             <div className="stat-card blue">
@@ -310,76 +385,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ── ROW 2: Recent Purchases + Low Stock ── */}
-          <div className="dash-grid-2">
-            {/* Recent Purchases */}
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">
-                  <span
-                    style={{
-                      background: "#dbeafe",
-                      color: "var(--blue)",
-                      width: 28,
-                      height: 28,
-                      borderRadius: 8,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <ShoppingCart size={15} />
-                  </span>
-                  Recent Purchases
-                </div>
-                <button
-                  className="view-all-btn"
-                  onClick={() => navigate("/purchasing")}
-                >
-                  View All <ChevronRight size={14} />
-                </button>
-              </div>
-              <div className="table-card">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>PO #</th>
-                      <th>Supplier</th>
-                      <th>Date</th>
-                      <th>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentPurchases.map((p, i) => (
-                      <tr key={i}>
-                        <td>
-                          <span className="purchase-po">{p.purchase_no}</span>
-                        </td>
-                        <td className="purchase-supplier">{p.supplier_name}</td>
-                        <td
-                          style={{ color: "var(--muted)", fontSize: "0.8rem" }}
-                        >
-                          {p.date
-                            ? new Date(p.date).toLocaleDateString("en-GB")
-                            : "—"}
-                        </td>
-                        <td className="purchase-amount">
-                          {fmtCur(p.total_amount)}
-                        </td>
-                      </tr>
-                    ))}
-                    {recentPurchases.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="empty-state">
-                          No purchases yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
             {/* Low Stock Alerts */}
             <div className="card">
               <div className="card-header">
@@ -400,14 +406,14 @@ export default function Dashboard() {
                   </span>
                   Low Stock Alerts
                 </div>
-                {lowStockRaw.length > 0 && (
+                {lowStockCombined.length > 0 && (
                   <span className="status-badge red">
-                    {lowStockRaw.length} items
+                    {lowStockCombined.length} items
                   </span>
                 )}
               </div>
-              <div className="card-body">
-                {lowStockRaw.length === 0 ? (
+              <div className="card-body" style={{ maxHeight: "310px", overflowY: "auto" }}>
+                {lowStockCombined.length === 0 ? (
                   <div
                     style={{
                       textAlign: "center",
@@ -423,12 +429,7 @@ export default function Dashboard() {
                     </p>
                   </div>
                 ) : (
-                  lowStockRaw.map((item, i) => {
-                    const pct =
-                      item.purchased > 0
-                        ? (item.balance / item.purchased) * 100
-                        : 0;
-                    const isCritical = pct < 10;
+                  lowStockCombined.map((item, i) => {
                     return (
                       <div key={i} className="low-stock-item">
                         <div>
@@ -438,9 +439,9 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <span
-                          className={`status-badge ${isCritical ? "red" : "amber"}`}
+                          className={`status-badge ${item.isCritical ? "red" : "amber"}`}
                         >
-                          {isCritical ? "Critical" : "Low"}
+                          {item.isCritical ? "Critical" : "Low"}
                         </span>
                       </div>
                     );
@@ -474,19 +475,29 @@ export default function Dashboard() {
                 <button
                   className="view-all-btn"
                   onClick={handleRawStockPrint}
-                  style={{ color: "#64748b" }}
+                  style={{ color: "#64748b", background: "transparent", border: "none", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
                 >
                   <Printer size={14} style={{ marginRight: "4px" }} /> Print
                 </button>
                 <button
                   className="view-all-btn"
                   onClick={() => navigate("/raw-stock")}
+                  style={{ background: "transparent", border: "none", color: "var(--blue)", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
                 >
-                  Full Report <ArrowUpRight size={14} />
+                  Full Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
+                </button>
+                <button
+                  className="btn-icon"
+                  style={{ marginLeft: "0.5rem" }}
+                  onClick={() => setShowRawStock(!showRawStock)}
+                >
+                  {showRawStock ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </button>
               </div>
             </div>
-            <div className="table-card">
+            
+            {showRawStock && (
+            <div className="table-card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -538,6 +549,7 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
           {/* ── ROW 4: FG Stock Table ── */}
@@ -560,14 +572,26 @@ export default function Dashboard() {
                 </span>
                 Finished Goods Stock Overview
               </div>
-              <button
-                className="view-all-btn"
-                onClick={() => navigate("/fg-stock")}
-              >
-                Full Report <ArrowUpRight size={14} />
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  className="view-all-btn"
+                  onClick={() => navigate("/fg-stock")}
+                  style={{ background: "transparent", border: "none", color: "var(--blue)", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
+                >
+                  Full Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
+                </button>
+                <button
+                  className="btn-icon"
+                  style={{ marginLeft: "0.5rem" }}
+                  onClick={() => setShowFgStock(!showFgStock)}
+                >
+                  {showFgStock ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </button>
+              </div>
             </div>
-            <div className="table-card">
+            
+            {showFgStock && (
+            <div className="table-card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -629,72 +653,7 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
-
-          {/* ── ROW 5: Recent Sales ── */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">
-                <span
-                  style={{
-                    background: "#fce7f3",
-                    color: "#be185d",
-                    width: 28,
-                    height: 28,
-                    borderRadius: 8,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <TrendingUp size={15} />
-                </span>
-                Recent Sales
-              </div>
-              <button
-                className="view-all-btn"
-                onClick={() => navigate("/sales")}
-              >
-                View All <ChevronRight size={14} />
-              </button>
-            </div>
-            <div className="table-card">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Bill #</th>
-                    <th>Customer</th>
-                    <th>Date</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSales.map((s, i) => (
-                    <tr key={i}>
-                      <td>
-                        <span className="purchase-po">{s.bill_no}</span>
-                      </td>
-                      <td className="purchase-supplier">{s.customer_name}</td>
-                      <td style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
-                        {s.date
-                          ? new Date(s.date).toLocaleDateString("en-GB")
-                          : "—"}
-                      </td>
-                      <td className="purchase-amount">
-                        {fmtCur(s.total_amount)}
-                      </td>
-                    </tr>
-                  ))}
-                  {recentSales.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="empty-state">
-                        No sales yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            )}
           </div>
         </>
       )}
