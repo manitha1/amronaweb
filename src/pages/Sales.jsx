@@ -53,7 +53,14 @@ export default function Sales() {
       )
       .order("production_headers(date)", { ascending: false });
     if (c) setCustomers(c);
-    if (b) setBatches(b);
+    if (b) {
+      const sortedBatches = b.sort((x, y) => {
+        const nameX = x.fg_items?.name?.toLowerCase() || "";
+        const nameY = y.fg_items?.name?.toLowerCase() || "";
+        return nameX.localeCompare(nameY);
+      });
+      setBatches(sortedBatches);
+    }
   };
 
   const generateNextInvoiceNo = async () => {
@@ -302,6 +309,7 @@ export default function Sales() {
         unit_price: Number(l.unit_price),
         production_header_id: l.batch_id || null,
         production_line_id: l.prod_line_id || null,
+        is_bulk: l.is_bulk || false,
       };
     });
 
