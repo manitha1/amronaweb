@@ -243,6 +243,63 @@ export default function Dashboard() {
     return () => window.removeEventListener("afterprint", afterPrint);
   }, []);
 
+  // Build a combined stock view — each FG variant (packet size or bulk) gets its own row.
+  // If a raw item name matches the FG name, the raw balance is shown on every FG variant row.
+  // Raw-only items (no matching FG at all) appear as a single row with FG balance = null.
+  const getCombinedStockView = () => {
+    // Build raw lookup by name (lowercase)
+    const rawMap = {};
+    rawByItem.forEach((r) => {
+      if (!r.name || r.name === '—') return;
+      rawMap[r.name.toLowerCase()] = r;
+    });
+
+    const rows = [];
+    const rawNamesUsed = new Set();
+
+    // One row per FG variant
+    fgByItem.forEach((f) => {
+      if (!f.name || f.name === '(Unknown)') return;
+      const key = f.name.toLowerCase();
+      const raw = rawMap[key] || null;
+      if (raw) rawNamesUsed.add(key);
+
+      rows.push({
+        name: f.name,
+        variant: f.variant,
+        rawBalance: raw ? raw.balance : null,
+        rawPurchased: raw ? raw.purchased : null,
+        rawUom: raw ? raw.uom : '',
+        fgBalance: f.balance,
+        fgProduced: f.produced,
+        fgSold: f.sold,
+        fgIsPacket: f.isPacket,
+      });
+    });
+
+    // Add raw-only items (no FG match)
+    rawByItem.forEach((r) => {
+      if (!r.name || r.name === '—') return;
+      if (!rawNamesUsed.has(r.name.toLowerCase())) {
+        rows.push({
+          name: r.name,
+          variant: null,
+          rawBalance: r.balance,
+          rawPurchased: r.purchased,
+          rawUom: r.uom,
+          fgBalance: null,
+          fgProduced: null,
+          fgSold: null,
+          fgIsPacket: false,
+        });
+      }
+    });
+
+    return rows.sort((a, b) =>
+      a.name.localeCompare(b.name) || (a.variant || '').localeCompare(b.variant || '')
+    );
+  };
+
   // Low stock items: balance < 20% of purchased for raw, balance < 20% of produced for FG
   const getLowStockAlerts = () => {
     const combinedMap = {};
@@ -294,6 +351,7 @@ export default function Dashboard() {
   };
 
   const lowStockCombined = getLowStockAlerts();
+  const combinedStockView = getCombinedStockView();
 
   if (loading)
     return (
@@ -451,14 +509,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ── ROW 3: Raw Stock Table ── */}
+          {/* ── COMBINED STOCK TABLE ── */}
           <div className="card">
             <div className="card-header">
               <div className="card-title">
                 <span
                   style={{
-                    background: "#dcfce7",
-                    color: "#16a34a",
+                    background: "#ede9fe",
+                    color: "#7c3aed",
                     width: 28,
                     height: 28,
                     borderRadius: 8,
@@ -469,7 +527,7 @@ export default function Dashboard() {
                 >
                   <Package size={15} />
                 </span>
-                Raw Material Stock Overview
+                Stock Overview
               </div>
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <button
@@ -484,7 +542,14 @@ export default function Dashboard() {
                   onClick={() => navigate("/raw-stock")}
                   style={{ background: "transparent", border: "none", color: "var(--blue)", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
                 >
-                  Full Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
+                  Raw Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
+                </button>
+                <button
+                  className="view-all-btn"
+                  onClick={() => navigate("/fg-stock")}
+                  style={{ background: "transparent", border: "none", color: "var(--blue)", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
+                >
+                  FG Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
                 </button>
                 <button
                   className="btn-icon"
@@ -495,164 +560,89 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            
-            {showRawStock && (
-            <div className="table-card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Raw Item</th>
-                    <th>Purchased</th>
-                    <th>Consumed</th>
-                    <th>Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rawByItem.map((r, i) => {
-                    const pct =
-                      r.purchased > 0 ? (r.balance / r.purchased) * 100 : 0;
-                    const isLow = pct < 20;
-                    const isEmpty = r.balance <= 0;
-                    const color = isEmpty
-                      ? "#ef4444"
-                      : isLow
-                        ? "#f59e0b"
-                        : "#22c55e";
-                    return (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{r.name}</td>
-                        <td>
-                          {fmt(r.purchased)} {r.uom}
-                        </td>
-                        <td
-                          style={{
-                            color: r.consumed > 0 ? "#ef4444" : "var(--muted)",
-                          }}
-                        >
-                          {fmt(r.consumed)}
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 700, color }}>
-                            {fmt(r.balance)} {r.uom}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {rawByItem.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="empty-state">
-                        No raw material records.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            )}
-          </div>
 
-          {/* ── ROW 4: FG Stock Table ── */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">
-                <span
-                  style={{
-                    background: "#dbeafe",
-                    color: "var(--blue)",
-                    width: 28,
-                    height: 28,
-                    borderRadius: 8,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <PackageSearch size={15} />
-                </span>
-                Finished Goods Stock Overview
-              </div>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button
-                  className="view-all-btn"
-                  onClick={() => navigate("/fg-stock")}
-                  style={{ background: "transparent", border: "none", color: "var(--blue)", display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", fontWeight: "600" }}
-                >
-                  Full Report <ArrowUpRight size={14} style={{ marginLeft: "4px" }} />
-                </button>
-                <button
-                  className="btn-icon"
-                  style={{ marginLeft: "0.5rem" }}
-                  onClick={() => setShowFgStock(!showFgStock)}
-                >
-                  {showFgStock ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                </button>
-              </div>
-            </div>
-            
-            {showFgStock && (
-            <div className="table-card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>FG Item</th>
-                    <th>Variant</th>
-                    <th>Produced</th>
-                    <th>Sold</th>
-                    <th>Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fgByItem.map((f, i) => {
-                    const pct =
-                      f.produced > 0 ? (f.balance / f.produced) * 100 : 0;
-                    const isLow = pct < 20;
-                    const isEmpty = f.balance <= 0;
-                    const color = isEmpty
-                      ? "#ef4444"
-                      : isLow
-                        ? "#f59e0b"
-                        : "#22c55e";
-                    return (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{f.name}</td>
-                        <td style={{ color: "#64748b", fontSize: "0.85rem" }}>
-                          {f.variant}
-                        </td>
-                        <td>
-                          {f.isPacket
-                            ? `${f.produced} pkts`
-                            : formatPacketSize(f.produced)}
-                        </td>
-                        <td
-                          style={{
-                            color: f.sold > 0 ? "#ef4444" : "var(--muted)",
-                          }}
-                        >
-                          {f.isPacket
-                            ? `${f.sold} pkts`
-                            : formatPacketSize(f.sold)}
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 700, color }}>
-                            {f.isPacket
-                              ? `${f.balance} pkts`
-                              : formatPacketSize(f.balance)}
-                          </span>
+            {showRawStock && (
+              <div className="table-card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th style={{ background: "#f0fdf4", color: "#16a34a" }}>Raw Balance</th>
+                      <th style={{ background: "#eff6ff", color: "#1d4ed8" }}>FG Balance</th>
+                      <th style={{ background: "#eff6ff", color: "#1d4ed8" }}>Variant</th>
+                      <th>Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {combinedStockView.map((row, i) => {
+                      const hasRaw = row.rawBalance !== null;
+                      const hasFg = row.fgBalance !== null;
+
+                      const rawIsLow = hasRaw && row.rawPurchased > 0 && (row.rawBalance / row.rawPurchased) * 100 < 20;
+                      const rawIsEmpty = hasRaw && row.rawBalance <= 0;
+                      const rawColor = !hasRaw ? "var(--muted)" : rawIsEmpty ? "#ef4444" : rawIsLow ? "#f59e0b" : "#22c55e";
+
+                      const fgIsLow = hasFg && row.fgProduced > 0 && (row.fgBalance / row.fgProduced) * 100 < 20;
+                      const fgIsEmpty = hasFg && row.fgBalance <= 0;
+                      const fgColor = !hasFg ? "var(--muted)" : fgIsEmpty ? "#ef4444" : fgIsLow ? "#f59e0b" : "#22c55e";
+
+                      const typeLabel = hasRaw && hasFg ? "Both" : hasRaw ? "Raw" : "FG";
+                      const typeBg = hasRaw && hasFg ? "#ede9fe" : hasRaw ? "#dcfce7" : "#dbeafe";
+                      const typeColor = hasRaw && hasFg ? "#7c3aed" : hasRaw ? "#16a34a" : "#1d4ed8";
+
+                      return (
+                        <tr key={i}>
+                          <td style={{ fontWeight: 600 }}>{row.name}</td>
+                          <td>
+                            {hasRaw ? (
+                              <span style={{ fontWeight: 700, color: rawColor }}>
+                                {fmt(row.rawBalance)} {row.rawUom}
+                              </span>
+                            ) : (
+                              <span style={{ color: "var(--muted)" }}>—</span>
+                            )}
+                          </td>
+                          <td>
+                            {hasFg ? (
+                              <span style={{ fontWeight: 700, color: fgColor }}>
+                                {row.fgIsPacket
+                                  ? `${row.fgBalance} pkts`
+                                  : formatPacketSize(row.fgBalance)}
+                              </span>
+                            ) : (
+                              <span style={{ color: "var(--muted)" }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ color: "#64748b", fontSize: "0.82rem" }}>
+                            {row.variant || <span style={{ color: "var(--muted)" }}>—</span>}
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                background: typeBg,
+                                color: typeColor,
+                                padding: "2px 10px",
+                                borderRadius: 12,
+                                fontSize: "0.78rem",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {typeLabel}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {combinedStockView.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="empty-state">
+                          No stock records.
                         </td>
                       </tr>
-                    );
-                  })}
-                  {fgByItem.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="empty-state">
-                        No finished goods records.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </>
