@@ -16,6 +16,8 @@ export default function Sales() {
   // Form State
   const [customers, setCustomers] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [rawItems, setRawItems] = useState([]);      // list of raw items
+  const [rawStock, setRawStock] = useState([]);       // raw_stock_view rows
 
   const [billNo, setBillNo] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -32,7 +34,7 @@ export default function Sales() {
     const { data: records, error } = await supabase
       .from("sales_headers")
       .select(
-        "*, customers(name), sales_lines(*, fg_items(name), production_headers(batch_no))",
+        "*, customers(name), sales_lines(*, fg_items(name), raw_items(name), production_headers(batch_no))",
       )
       .order("created_at", { ascending: false });
     if (error) toast.error("Error fetching sales: " + error.message);
@@ -41,17 +43,30 @@ export default function Sales() {
   };
 
   const fetchLookups = async () => {
+    // Customers
     const { data: c } = await supabase.from("customers").select("id, name");
+
+    // FG production batches
     const { data: b } = await supabase
       .from("production_lines")
       .select(
-        `
-                id, fg_item_id, total_qty, qty_per_packet,
-                production_headers(id, batch_no, date),
-                fg_items(name, batch_code)
-            `,
+        `id, fg_item_id, total_qty, qty_per_packet,
+         production_headers(id, batch_no, date),
+         fg_items(name, batch_code)`,
       )
       .order("production_headers(date)", { ascending: false });
+
+    // Raw items
+    const { data: ri } = await supabase
+      .from("raw_items")
+      .select("id, name, uom")
+      .order("name");
+
+    // Raw stock balances
+    const { data: rs } = await supabase
+      .from("raw_stock_view")
+      .select("raw_item_id, raw_item_name, balance");
+
     if (c) setCustomers(c);
     if (b) {
       const sortedBatches = b.sort((x, y) => {
@@ -61,6 +76,26 @@ export default function Sales() {
       });
       setBatches(sortedBatches);
     }
+    if (ri) setRawItems(ri);
+    if (rs) setRawStock(rs);
+  };
+
+  const getRawBalance = (rawItemId) => {
+    const row = rawStock.find((r) => r.raw_item_id === rawItemId);
+    return row ? Number(row.balance) : 0;
+  };
+
+  // Returns the raw item's native UOM string (e.g. "Kg", "g")
+  const getRawItemUom = (rawItemId) =>
+    rawItems.find((r) => r.id === rawItemId)?.uom || "";
+
+  // Converts a packet_size (entered in sizeUnit: "g"|"kg") to the raw item's native UOM.
+  // Example: 500g → 0.5 if native UOM is "Kg"; 500g → 500 if native UOM is "g"
+  const packetSizeInNativeUom = (sizeValue, sizeUnit, nativeUom) => {
+    const sizeInGrams = sizeUnit === "kg" ? Number(sizeValue) * 1000 : Number(sizeValue);
+    const uomLower = (nativeUom || "").toLowerCase();
+    if (uomLower === "kg") return sizeInGrams / 1000;
+    return sizeInGrams; // g or any non-kg UOM
   };
 
   const generateNextInvoiceNo = async () => {
@@ -108,14 +143,40 @@ export default function Sales() {
     setCustomerId(row.customer_id);
     setDate(row.date);
     const parsedLines = (row.sales_lines || []).map((l) => {
+      const itype = l.item_type || "fg";
       let size = l.packet_size || "";
       let sUnit = "g";
       if (size && size >= 1000 && size % 1000 === 0) {
         size = size / 1000;
         sUnit = "kg";
       }
+
+      if (itype === "raw") {
+        return {
+          id: l.id,
+          item_type: "raw",
+          raw_item_id: l.raw_item_id || "",
+          raw_item_name: l.raw_items?.name || "",
+          raw_sale_mode: l.packet_size ? "packets" : "bulk",
+          fg_item_id: "",
+          fg_item_name: "",
+          batch_id: "",
+          prod_line_id: "",
+          is_bulk: false,
+          packet_size: size,
+          size_unit: sUnit,
+          qty: l.qty,
+          unit_price: l.unit_price,
+          availableQty: null,
+        };
+      }
+
       return {
         id: l.id,
+        item_type: "fg",
+        raw_item_id: "",
+        raw_item_name: "",
+        raw_sale_mode: "bulk",
         batch_id: l.production_header_id || "",
         prod_line_id: "",
         fg_item_id: l.fg_item_id,
@@ -132,64 +193,52 @@ export default function Sales() {
     setIsModalOpen(true);
   };
 
+  const emptyLine = () => ({
+    id: Date.now(),
+    item_type: "fg",            // 'fg' | 'raw'
+    // FG fields
+    prod_line_id: "",
+    batch_id: "",
+    fg_item_id: "",
+    fg_item_name: "",
+    is_bulk: false,
+    // Raw fields
+    raw_item_id: "",
+    raw_item_name: "",
+    raw_sale_mode: "bulk",      // 'bulk' | 'packets'
+    // Shared
+    packet_size: "",
+    size_unit: "g",
+    qty: "",
+    unit_price: "",
+    availableQty: null,
+  });
+
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
     setBillNo("");
     setCustomerId("");
     setDate(format(new Date(), "yyyy-MM-dd"));
-    setLines([
-      {
-        id: Date.now(),
-        fg_item_id: "",
-        batch_id: "",
-        prod_line_id: "",
-        fg_item_name: "",
-        is_bulk: false,
-        packet_size: "",
-        size_unit: "g",
-        availableQty: null,
-        qty: 1,
-        unit_price: 0,
-      },
-    ]);
+    setLines([emptyLine()]);
   };
 
   const handlePrint = (row) => {
     setViewTarget(row);
-    // Wait for React to mount the hidden print container into the DOM
-    setTimeout(() => {
-      window.print();
-    }, 300);
+    setTimeout(() => { window.print(); }, 300);
   };
 
   useEffect(() => {
-    // When the print dialog is closed, unmount the print container
-    // so it doesn't stay invisibly loaded or accidentally re-printed.
     const afterPrint = () => setViewTarget(null);
     window.addEventListener("afterprint", afterPrint);
     return () => window.removeEventListener("afterprint", afterPrint);
   }, []);
 
   const addLine = () => {
-    setLines([
-      ...lines,
-      {
-        id: Date.now(),
-        prod_line_id: "",
-        batch_id: "",
-        fg_item_id: "",
-        fg_item_name: "",
-        is_bulk: false,
-        packet_size: "",
-        size_unit: "g",
-        qty: "",
-        unit_price: "",
-        availableQty: null,
-      },
-    ]);
+    setLines([...lines, emptyLine()]);
   };
 
+  // ── FG batch lookup ────────────────────────────────────────────────────────
   const selectBatchLine = async (lineId, prodLineId) => {
     const batchLine = batches.find((b) => b.id === prodLineId);
     if (!batchLine) {
@@ -248,8 +297,51 @@ export default function Sales() {
     );
   };
 
+  // ── Raw item pick ──────────────────────────────────────────────────────────
+  const selectRawItem = (lineId, rawItemId) => {
+    const ri = rawItems.find((r) => r.id === rawItemId);
+    if (!ri) {
+      setLines(
+        lines.map((l) =>
+          l.id === lineId
+            ? { ...l, raw_item_id: "", raw_item_name: "", availableQty: null }
+            : l,
+        ),
+      );
+      return;
+    }
+    const bal = getRawBalance(rawItemId);
+    setLines(
+      lines.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              raw_item_id: rawItemId,
+              raw_item_name: ri.name,
+              availableQty: bal,
+            }
+          : l,
+      ),
+    );
+  };
+
   const updateLine = (id, field, value) => {
     setLines(lines.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
+  };
+
+  // Switching item_type resets fields
+  const changeItemType = (lineId, newType) => {
+    setLines(
+      lines.map((l) =>
+        l.id === lineId
+          ? {
+              ...emptyLine(),
+              id: l.id,
+              item_type: newType,
+            }
+          : l,
+      ),
+    );
   };
 
   const removeLine = (id) => {
@@ -263,47 +355,98 @@ export default function Sales() {
     );
   };
 
-  // Format gram value → "25g", "100g", "1kg" etc.
   const formatPacketSize = (val) => {
     const g = Number(val);
     if (!g) return val;
     return g >= 1000 ? `${g / 1000}kg` : `${g}g`;
   };
 
-  // ── SUBMIT (CREATE or UPDATE) ──────────────────────────────────────────────
+  // ── SUBMIT ─────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (lines.length === 0) return toast.error("Add at least one item line");
 
     for (const l of lines) {
-      if (!l.fg_item_id || l.qty <= 0 || l.unit_price < 0) {
-        return toast.error("Please fill all lines correctly");
-      }
-      if (l.is_bulk && !l.packet_size) {
-        return toast.error(
-          "Please specify a packet size (in grams) for bulk items being sold as packets.",
-        );
-      }
+      if (l.item_type === "raw") {
+        if (!l.raw_item_id) return toast.error("Select a raw item for each raw line");
+        if (!l.qty || Number(l.qty) <= 0) return toast.error("Enter a valid qty for each line");
+        if (Number(l.unit_price) < 0) return toast.error("Unit price cannot be negative");
 
-      let pSize = l.packet_size ? Number(l.packet_size) : 0;
-      if (l.is_bulk && l.size_unit === "kg") pSize = pSize * 1000;
+        const rawUom = getRawItemUom(l.raw_item_id);
 
-      const totalGramsNeeded = l.is_bulk
-        ? Number(l.qty) * pSize
-        : Number(l.qty);
-      if (totalGramsNeeded > l.availableQty) {
-        return toast.error(
-          `Not enough stock for ${l.fg_item_name}. Needed: ${totalGramsNeeded}, Available: ${l.availableQty}`,
-        );
+        if (l.raw_sale_mode === "packets") {
+          if (!l.packet_size || Number(l.packet_size) <= 0)
+            return toast.error(`Enter packet size for ${l.raw_item_name}`);
+
+          // Convert packet_size to native UOM for comparison
+          const pSizeNative = packetSizeInNativeUom(l.packet_size, l.size_unit, rawUom);
+          const totalNeeded = Number(l.qty) * pSizeNative;
+
+          if (l.availableQty !== null && totalNeeded > l.availableQty) {
+            return toast.error(
+              `Not enough raw stock for ${l.raw_item_name}. Needed: ${totalNeeded.toFixed(3)} ${rawUom}, Available: ${l.availableQty} ${rawUom}`,
+            );
+          }
+        } else {
+          // bulk: qty is directly in raw item's native UOM
+          if (l.availableQty !== null && Number(l.qty) > l.availableQty) {
+            return toast.error(
+              `Not enough raw stock for ${l.raw_item_name}. Needed: ${l.qty} ${rawUom}, Available: ${l.availableQty} ${rawUom}`,
+            );
+          }
+        }
+      } else {
+        // FG
+        if (!l.fg_item_id || Number(l.qty) <= 0 || Number(l.unit_price) < 0) {
+          return toast.error("Please fill all FG lines correctly");
+        }
+        if (l.is_bulk && !l.packet_size) {
+          return toast.error(
+            "Please specify a packet size for bulk FG items being sold as packets.",
+          );
+        }
+
+        let pSize = l.packet_size ? Number(l.packet_size) : 0;
+        if (l.is_bulk && l.size_unit === "kg") pSize = pSize * 1000;
+
+        const totalGramsNeeded = l.is_bulk ? Number(l.qty) * pSize : Number(l.qty);
+        if (totalGramsNeeded > l.availableQty) {
+          return toast.error(
+            `Not enough stock for ${l.fg_item_name}. Needed: ${totalGramsNeeded}, Available: ${l.availableQty}`,
+          );
+        }
       }
     }
 
     const linePayload = lines.map((l) => {
+      if (l.item_type === "raw") {
+        // Send packet_size in the raw item's native UOM so the DB stock check
+        // uses the same unit as raw_stock_view.balance
+        const rawUom = getRawItemUom(l.raw_item_id);
+        let pSize = l.raw_sale_mode === "packets" && l.packet_size
+          ? packetSizeInNativeUom(l.packet_size, l.size_unit, rawUom)
+          : null;
+
+        return {
+          item_type: "raw",
+          raw_item_id: l.raw_item_id,
+          fg_item_id: null,
+          qty: Number(l.qty),
+          packet_size: pSize,
+          unit_price: Number(l.unit_price),
+          is_bulk: false,
+          production_header_id: null,
+          production_line_id: null,
+        };
+      }
+
       let pSize = l.packet_size ? Number(l.packet_size) : null;
       if (l.is_bulk && l.size_unit === "kg" && pSize) pSize = pSize * 1000;
 
       return {
+        item_type: "fg",
         fg_item_id: l.fg_item_id,
+        raw_item_id: null,
         qty: Number(l.qty),
         packet_size: pSize,
         unit_price: Number(l.unit_price),
@@ -326,7 +469,8 @@ export default function Sales() {
       } else {
         toast.success("Sale Updated Successfully!");
         closeModal();
-        fetchData();
+        await fetchData();
+        await fetchLookups();
       }
     } else {
       const payload = {
@@ -341,7 +485,8 @@ export default function Sales() {
       } else {
         toast.success("Sale Posted Successfully!");
         closeModal();
-        fetchData();
+        await fetchData();
+        await fetchLookups();
       }
     }
   };
@@ -355,8 +500,9 @@ export default function Sales() {
     if (error) {
       toast.error("Delete Failed: " + error.message);
     } else {
-      toast.success("Sale deleted and FG stock restored.");
+      toast.success("Sale deleted and stock restored.");
       fetchData();
+      fetchLookups();
     }
     setDeleteTarget(null);
   };
@@ -367,12 +513,13 @@ export default function Sales() {
       item.customers?.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
+  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div className="page-container">
       <div className="page-header-row">
         <div>
           <h2>Sales (Out)</h2>
-          <p>Record finished goods sales to customers</p>
+          <p>Record finished goods & raw material sales to customers</p>
         </div>
         <button className="btn-primary" onClick={openCreateModal}>
           <Plus size={18} /> New Sale
@@ -472,7 +619,7 @@ export default function Sales() {
       {/* ── CREATE / EDIT MODAL ── */}
       {isModalOpen && (
         <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "1100px" }}>
+          <div className="modal-content" style={{ maxWidth: "1200px" }}>
             <div className="modal-header">
               <h3>
                 {editingId ? "Edit Sales Invoice" : "Create Sales Invoice"}
@@ -550,258 +697,285 @@ export default function Sales() {
                 </button>
               </div>
 
-              <table className="data-table" style={{ marginBottom: "1rem" }}>
-                <thead>
-                  <tr>
-                    <th>Production Batch</th>
-                    <th>Product (FG)</th>
-                    <th>Packet Size</th>
-                    <th>Packets Sold</th>
-                    <th>Unit Price (LKR)</th>
-                    <th>Subtotal</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line) => (
-                    <tr key={line.id}>
-                      <td>
-                        <select
-                          className="form-group"
-                          style={{ marginBottom: 0, minWidth: "180px" }}
-                          value={line.prod_line_id}
-                          onChange={(e) =>
-                            selectBatchLine(line.id, e.target.value)
-                          }
-                        >
-                          <option value="">Select Batch Item</option>
-                          {batches.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.production_headers?.batch_no} -{" "}
-                              {b.fg_items?.name}{" "}
-                              {b.fg_items?.batch_code
-                                ? `[${b.fg_items.batch_code}]`
-                                : ""}{" "}
-                              (
-                              {b.qty_per_packet
-                                ? `${b.total_qty} pkts of ${formatPacketSize(b.qty_per_packet)}`
-                                : `Bulk ${formatPacketSize(b.total_qty)}`}
-                              )
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        {line.fg_item_name ? (
-                          <span style={{ fontWeight: 600, color: "#1e293b" }}>
-                            {line.fg_item_name}
-                          </span>
-                        ) : (
-                          <span
-                            style={{ color: "#94a3b8", fontSize: "0.85rem" }}
-                          >
-                            — select item —
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
-                        >
-                          <input
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table" style={{ marginBottom: "1rem", minWidth: "950px" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "100px" }}>Type</th>
+                      <th>Item / Batch</th>
+                      <th style={{ width: "110px" }}>Mode</th>
+                      <th style={{ width: "150px" }}>Packet Size</th>
+                      <th style={{ width: "120px" }}>Qty</th>
+                      <th style={{ width: "130px" }}>Unit Price (LKR)</th>
+                      <th style={{ width: "100px" }}>Subtotal</th>
+                      <th style={{ width: "36px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((line) => (
+                      <tr key={line.id}>
+                        {/* ── TYPE TOGGLE ── */}
+                        <td>
+                          <select
                             className="form-group"
-                            style={{
-                              marginBottom: 0,
-                              width: "90px",
-                              ...(line.is_bulk
-                                ? {}
-                                : {
-                                    backgroundColor: "#f8fafc",
-                                    cursor: "not-allowed",
-                                  }),
-                            }}
-                            type={line.is_bulk ? "number" : "text"}
-                            min={line.is_bulk ? "0.1" : undefined}
-                            step="any"
-                            value={
-                              line.is_bulk
-                                ? line.packet_size
-                                : line.packet_size
-                                  ? formatPacketSize(line.packet_size)
-                                  : ""
-                            }
-                            onChange={(e) => {
-                              if (line.is_bulk) {
-                                updateLine(
-                                  line.id,
-                                  "packet_size",
-                                  e.target.value,
-                                );
-                              }
-                            }}
-                            readOnly={!line.is_bulk}
-                            placeholder={line.is_bulk ? "e.g. 50" : ""}
-                            required
-                          />
-                          {line.is_bulk && (
-                            <span
-                              style={{ fontSize: "0.85rem", color: "#64748b" }}
+                            style={{ marginBottom: 0, minWidth: "90px", fontWeight: 700 }}
+                            value={line.item_type}
+                            onChange={(e) => changeItemType(line.id, e.target.value)}
+                          >
+                            <option value="fg">FG</option>
+                            <option value="raw">Raw</option>
+                          </select>
+                        </td>
+
+                        {/* ── ITEM / BATCH ── */}
+                        <td>
+                          {line.item_type === "raw" ? (
+                            <select
+                              className="form-group"
+                              style={{ marginBottom: 0, minWidth: "200px" }}
+                              value={line.raw_item_id}
+                              onChange={(e) => selectRawItem(line.id, e.target.value)}
                             >
+                              <option value="">Select Raw Item</option>
+                              {rawItems.map((ri) => (
+                                <option key={ri.id} value={ri.id}>
+                                  {ri.name} ({ri.uom})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <select
+                              className="form-group"
+                              style={{ marginBottom: 0, minWidth: "220px" }}
+                              value={line.prod_line_id}
+                              onChange={(e) =>
+                                selectBatchLine(line.id, e.target.value)
+                              }
+                            >
+                              <option value="">Select Batch Item</option>
+                              {batches.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                  {b.production_headers?.batch_no} -{" "}
+                                  {b.fg_items?.name}{" "}
+                                  {b.fg_items?.batch_code
+                                    ? `[${b.fg_items.batch_code}]`
+                                    : ""}{" "}
+                                  (
+                                  {b.qty_per_packet
+                                    ? `${b.total_qty} pkts of ${formatPacketSize(b.qty_per_packet)}`
+                                    : `Bulk ${formatPacketSize(b.total_qty)}`}
+                                  )
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {/* show item name for FG lines */}
+                          {line.item_type === "fg" && line.fg_item_name && (
+                            <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "2px" }}>
+                              {line.fg_item_name}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* ── MODE (Raw only) ── */}
+                        <td>
+                          {line.item_type === "raw" ? (
+                            <select
+                              className="form-group"
+                              style={{ marginBottom: 0 }}
+                              value={line.raw_sale_mode}
+                              onChange={(e) =>
+                                updateLine(line.id, "raw_sale_mode", e.target.value)
+                              }
+                            >
+                              <option value="bulk">Bulk</option>
+                              <option value="packets">Packets</option>
+                            </select>
+                          ) : (
+                            <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
+                              {line.is_bulk ? "Bulk→Pkts" : "Packets"}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* ── PACKET SIZE ── */}
+                        <td>
+                          {/* Raw packets OR FG bulk-to-packet: show size input */}
+                          {(line.item_type === "raw" && line.raw_sale_mode === "packets") ||
+                           (line.item_type === "fg" && line.is_bulk) ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                              <input
+                                className="form-group"
+                                style={{ marginBottom: 0, width: "70px" }}
+                                type="number"
+                                min="0.1"
+                                step="any"
+                                value={line.packet_size}
+                                onChange={(e) =>
+                                  updateLine(line.id, "packet_size", e.target.value)
+                                }
+                                placeholder="e.g. 50"
+                              />
                               <select
                                 style={{
-                                  border: "none",
-                                  background: "transparent",
-                                  fontSize: "inherit",
-                                  color: "inherit",
-                                  padding: 0,
+                                  border: "1px solid #e2e8f0",
+                                  borderRadius: "6px",
+                                  padding: "2px 4px",
+                                  fontSize: "0.85rem",
+                                  color: "#64748b",
                                   cursor: "pointer",
+                                  background: "#f8fafc",
                                 }}
                                 value={line.size_unit || "g"}
                                 onChange={(e) =>
-                                  updateLine(
-                                    line.id,
-                                    "size_unit",
-                                    e.target.value,
-                                  )
+                                  updateLine(line.id, "size_unit", e.target.value)
                                 }
                               >
                                 <option value="g">g</option>
                                 <option value="kg">kg</option>
                               </select>
+                            </div>
+                          ) : (
+                            /* FG fixed packet size (read-only) or Raw bulk (N/A) */
+                            <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                              {line.item_type === "fg" && line.packet_size
+                                ? formatPacketSize(line.packet_size)
+                                : "—"}
                             </span>
                           )}
-                        </div>
-                      </td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "4px",
-                          }}
-                        >
-                          <input
-                            className="form-group"
-                            style={{ marginBottom: 0, width: "90px" }}
-                            type="number"
-                            min="0.1"
-                            step="any"
-                            value={line.qty}
-                            onChange={(e) =>
-                              updateLine(line.id, "qty", e.target.value)
-                            }
-                            required
-                          />
-                          {line.availableQty !== null && (
-                            <span
-                              style={{
-                                fontSize: "0.72rem",
-                                fontWeight: 600,
-                                padding: "2px 6px",
-                                borderRadius: "4px",
-                                whiteSpace: "nowrap",
-                                background:
-                                  line.availableQty <= 0
-                                    ? "#fee2e2"
-                                    : line.availableQty < 1000
-                                      ? "#fef9c3"
-                                      : "#dcfce7",
-                                color:
-                                  line.availableQty <= 0
-                                    ? "#dc2626"
-                                    : line.availableQty < 1000
-                                      ? "#ca8a04"
-                                      : "#16a34a",
-                              }}
-                            >
-                              In stock:{" "}
-                              {line.is_bulk
-                                ? formatPacketSize(line.availableQty)
-                                : `${line.availableQty} pkts`}
-                              {line.is_bulk && line.packet_size && line.qty && (
-                                <span
-                                  style={{
-                                    marginLeft: "4px",
-                                    fontStyle: "italic",
-                                    fontWeight: "normal",
-                                  }}
-                                >
-                                  (Needs{" "}
-                                  {formatPacketSize(
-                                    Number(line.qty) * Number(line.packet_size),
-                                  )}
-                                  )
-                                </span>
-                              )}
+                        </td>
+
+                        {/* ── QTY ── */}
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <input
+                              className="form-group"
+                              style={{ marginBottom: 0, width: "90px" }}
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              value={line.qty}
+                              onChange={(e) =>
+                                updateLine(line.id, "qty", e.target.value)
+                              }
+                              placeholder={
+                                line.item_type === "raw" && line.raw_sale_mode === "bulk"
+                                  ? (rawItems.find(r => r.id === line.raw_item_id)?.uom || "qty")
+                                  : "qty"
+                              }
+                              required
+                            />
+                            {/* Stock availability badge */}
+                            {line.availableQty !== null && (
+                              <span
+                                style={{
+                                  fontSize: "0.72rem",
+                                  fontWeight: 600,
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  whiteSpace: "nowrap",
+                                  background:
+                                    line.availableQty <= 0
+                                      ? "#fee2e2"
+                                      : line.availableQty < (line.item_type === "raw" ? 5 : 1000)
+                                        ? "#fef9c3"
+                                        : "#dcfce7",
+                                  color:
+                                    line.availableQty <= 0
+                                      ? "#dc2626"
+                                      : line.availableQty < (line.item_type === "raw" ? 5 : 1000)
+                                        ? "#ca8a04"
+                                        : "#16a34a",
+                                }}
+                              >
+                                {line.item_type === "raw"
+                                  ? `In stock: ${line.availableQty} ${rawItems.find(r => r.id === line.raw_item_id)?.uom || ""}`
+                                  : line.is_bulk
+                                    ? `In stock: ${formatPacketSize(line.availableQty)}`
+                                    : `In stock: ${line.availableQty} pkts`}
+                                {/* Needs label for raw packet mode — show in native UOM */}
+                                {line.item_type === "raw" &&
+                                  line.raw_sale_mode === "packets" &&
+                                  line.packet_size &&
+                                  line.qty && (() => {
+                                    const rawUom = getRawItemUom(line.raw_item_id);
+                                    const pSizeNative = packetSizeInNativeUom(
+                                      line.packet_size, line.size_unit, rawUom
+                                    );
+                                    const totalNeeded = (Number(line.qty) * pSizeNative).toFixed(3);
+                                    return (
+                                      <span style={{ marginLeft: "4px", fontStyle: "italic", fontWeight: "normal" }}>
+                                        (Needs {totalNeeded} {rawUom})
+                                      </span>
+                                    );
+                                  })()}
+                                {line.item_type === "fg" && line.is_bulk && line.packet_size && line.qty && (
+                                  <span style={{ marginLeft: "4px", fontStyle: "italic", fontWeight: "normal" }}>
+                                    (Needs{" "}
+                                    {formatPacketSize(
+                                      Number(line.qty) * Number(line.packet_size),
+                                    )}
+                                    )
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* ── UNIT PRICE ── */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 600 }}>
+                              LKR
                             </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "0.8rem",
-                              color: "#64748b",
-                              fontWeight: 600,
-                            }}
+                            <input
+                              className="form-group"
+                              style={{ marginBottom: 0, width: "90px" }}
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={line.unit_price}
+                              onChange={(e) =>
+                                updateLine(line.id, "unit_price", e.target.value)
+                              }
+                              required
+                            />
+                          </div>
+                        </td>
+
+                        {/* ── SUBTOTAL ── */}
+                        <td>
+                          LKR{" "}
+                          {(Number(line.qty) * Number(line.unit_price)).toFixed(2)}
+                        </td>
+
+                        {/* ── REMOVE ── */}
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            onClick={() => removeLine(line.id)}
                           >
-                            LKR
-                          </span>
-                          <input
-                            className="form-group"
-                            style={{ marginBottom: 0, width: "100px" }}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={line.unit_price}
-                            onChange={(e) =>
-                              updateLine(line.id, "unit_price", e.target.value)
-                            }
-                            required
-                          />
-                        </div>
-                      </td>
-                      <td>
-                        LKR{" "}
-                        {(Number(line.qty) * Number(line.unit_price)).toFixed(
-                          2,
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn-icon"
-                          onClick={() => removeLine(line.id)}
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {lines.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan="8"
+                          className="text-muted"
+                          style={{ textAlign: "center" }}
                         >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {lines.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan="6"
-                        className="text-muted"
-                        style={{ textAlign: "center" }}
-                      >
-                        No items added
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                          No items added
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
               <div
                 style={{
@@ -849,8 +1023,8 @@ export default function Sales() {
                 <strong>{deleteTarget.bill_no}</strong>?
                 <br />
                 <span style={{ color: "#ef4444", fontSize: "0.9rem" }}>
-                  ⚠ This will restore the FG stock quantities sold in this
-                  invoice.
+                  ⚠ This will restore the stock quantities sold in this invoice
+                  (FG and Raw).
                 </span>
               </p>
               <div className="modal-actions">
@@ -865,7 +1039,7 @@ export default function Sales() {
                   onClick={handleDelete}
                   style={{ background: "#ef4444" }}
                 >
-                  Delete & Restore Stock
+                  Delete &amp; Restore Stock
                 </button>
               </div>
             </div>
@@ -876,7 +1050,7 @@ export default function Sales() {
       {/* ── BILL DETAIL MODAL ── */}
       {viewTarget && (
         <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "650px" }}>
+          <div className="modal-content" style={{ maxWidth: "700px" }}>
             <div className="modal-header">
               <div>
                 <h3>{viewTarget.bill_no}</h3>
@@ -885,9 +1059,7 @@ export default function Sales() {
                   &nbsp;|&nbsp;{viewTarget.customers?.name}
                 </p>
               </div>
-              <div
-                style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
-              >
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <button
                   className="btn-icon"
                   onClick={() => setViewTarget(null)}
@@ -901,10 +1073,11 @@ export default function Sales() {
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Batch No</th>
+                    <th>Type</th>
+                    <th>Batch / Item</th>
                     <th>Product</th>
                     <th>Packet Size</th>
-                    <th>Qty (Pkts)</th>
+                    <th>Qty</th>
                     <th>Unit Price</th>
                     <th>Subtotal</th>
                   </tr>
@@ -914,13 +1087,27 @@ export default function Sales() {
                     <tr key={l.id}>
                       <td style={{ color: "#94a3b8" }}>{i + 1}</td>
                       <td>
-                        <strong>{l.production_headers?.batch_no || "—"}</strong>
+                        <span
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "0.75rem",
+                            fontWeight: 700,
+                            background: l.item_type === "raw" ? "#fef9c3" : "#dcfce7",
+                            color: l.item_type === "raw" ? "#92400e" : "#166534",
+                          }}
+                        >
+                          {l.item_type === "raw" ? "Raw" : "FG"}
+                        </span>
                       </td>
-                      <td>{l.fg_items?.name}</td>
                       <td>
-                        {l.packet_size
-                          ? formatPacketSize(l.packet_size)
-                          : "Bulk"}
+                        <strong>{l.production_headers?.batch_no || (l.item_type === "raw" ? "—" : "—")}</strong>
+                      </td>
+                      <td>
+                        {l.item_type === "raw" ? l.raw_items?.name : l.fg_items?.name}
+                      </td>
+                      <td>
+                        {l.packet_size ? formatPacketSize(l.packet_size) : "Bulk"}
                       </td>
                       <td>{Number(l.qty).toFixed(0)}</td>
                       <td>LKR {Number(l.unit_price).toFixed(2)}</td>
@@ -929,7 +1116,7 @@ export default function Sales() {
                   ))}
                   {(viewTarget.sales_lines || []).length === 0 && (
                     <tr>
-                      <td colSpan="7" className="empty-state">
+                      <td colSpan="8" className="empty-state">
                         No lines found.
                       </td>
                     </tr>
@@ -951,6 +1138,7 @@ export default function Sales() {
           </div>
         </div>
       )}
+
       {/* ── PRINT ONLY INVOICE TEMPLATE ── */}
       {viewTarget && (
         <div className="print-invoice-container">
@@ -1005,11 +1193,15 @@ export default function Sales() {
               </tr>
             </thead>
             <tbody>
-              {/* Render up to 14 rows minimum to match physical book layout */}
               {Array.from({
                 length: Math.max(14, (viewTarget.sales_lines || []).length),
               }).map((_, i) => {
                 const l = viewTarget.sales_lines?.[i];
+                const itemName = l
+                  ? l.item_type === "raw"
+                    ? l.raw_items?.name
+                    : l.fg_items?.name
+                  : "";
                 return (
                   <tr key={i}>
                     <td className="center" style={{ fontWeight: "bold" }}>
@@ -1017,7 +1209,7 @@ export default function Sales() {
                     </td>
                     <td>
                       {l
-                        ? `${l.fg_items?.name} ${l.packet_size ? formatPacketSize(l.packet_size) : "(Bulk)"}`
+                        ? `${itemName} ${l.packet_size ? formatPacketSize(l.packet_size) : "(Bulk)"}${l.item_type === "raw" ? " [Raw]" : ""}`
                         : ""}
                     </td>
                     <td className="num">

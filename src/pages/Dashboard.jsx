@@ -145,17 +145,21 @@ export default function Dashboard() {
   };
 
   const fetchRawByItem = async () => {
-    const [{ data: purchaseLines }, { data: consumptions }] = await Promise.all(
-      [
+    const [{ data: purchaseLines }, { data: consumptions }, { data: rawSalesLines }] =
+      await Promise.all([
         supabase
           .from("purchase_lines")
           .select("qty, raw_item_id, raw_items(name, uom)"),
         supabase.from("production_consumptions").select("raw_item_id, qty"),
-      ],
-    );
+        supabase
+          .from("sales_lines")
+          .select("raw_item_id, qty, packet_size")
+          .eq("item_type", "raw"),
+      ]);
     const purchasedMap = {},
       uomMap = {},
-      consumedMap = {};
+      consumedMap = {},
+      soldMap = {};
     (purchaseLines || []).forEach((pl) => {
       const id = pl.raw_item_id;
       purchasedMap[id] = (purchasedMap[id] || 0) + Number(pl.qty);
@@ -165,14 +169,25 @@ export default function Dashboard() {
       consumedMap[c.raw_item_id] =
         (consumedMap[c.raw_item_id] || 0) + Number(c.qty);
     });
+    // Subtract raw item direct sales — packet_size already in native UOM
+    (rawSalesLines || []).forEach((s) => {
+      if (!s.raw_item_id) return;
+      const deducted = s.packet_size
+        ? Number(s.qty) * Number(s.packet_size)
+        : Number(s.qty);
+      soldMap[s.raw_item_id] = (soldMap[s.raw_item_id] || 0) + deducted;
+    });
     const rows = Object.keys(purchasedMap)
-      .map((id) => ({
-        name: uomMap[id]?.name || "—",
-        uom: uomMap[id]?.uom || "",
-        purchased: purchasedMap[id],
-        consumed: consumedMap[id] || 0,
-        balance: Math.max(0, purchasedMap[id] - (consumedMap[id] || 0)),
-      }))
+      .map((id) => {
+        const totalOut = (consumedMap[id] || 0) + (soldMap[id] || 0);
+        return {
+          name: uomMap[id]?.name || "—",
+          uom: uomMap[id]?.uom || "",
+          purchased: purchasedMap[id],
+          consumed: totalOut,
+          balance: Math.max(0, purchasedMap[id] - totalOut),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
     setRawByItem(rows);
   };

@@ -22,11 +22,26 @@ export default function RawStockReport() {
             .from('production_consumptions')
             .select('purchase_no, raw_item_id, qty');
 
-        // Build consumed map: key = "purchaseHeaderId|rawItemId"
+        // Also fetch raw item sales lines so sold qty is subtracted from stock
+        const { data: rawSalesLines } = await supabase
+            .from('sales_lines')
+            .select('raw_item_id, qty, packet_size')
+            .eq('item_type', 'raw');
+
+        // Build consumed map: key = "purchaseHeaderId|rawItemId" for production
         const consumedMap = {};
         (consumptions || []).forEach(c => {
             const key = `${c.purchase_no}|${c.raw_item_id}`;
             consumedMap[key] = (consumedMap[key] || 0) + Number(c.qty);
+        });
+
+        // Build map of total raw sales by raw_item_id (global, not per purchase)
+        const soldByItem = {};
+        (rawSalesLines || []).forEach(s => {
+            if (!s.raw_item_id) return;
+            // packet_size is already in native UOM; qty*packet_size = total deducted, or just qty for bulk
+            const deducted = s.packet_size ? Number(s.qty) * Number(s.packet_size) : Number(s.qty);
+            soldByItem[s.raw_item_id] = (soldByItem[s.raw_item_id] || 0) + deducted;
         });
 
         // Group by purchase header
@@ -39,12 +54,18 @@ export default function RawStockReport() {
                 purchaseGroups[pid] = { purchase_no: pno, date: pdate, lines: [] };
             }
             const consumed = consumedMap[`${pid}|${pl.raw_item_id}`] || 0;
+            // Distribute raw sales proportionally across purchase lines for the same item
+            const soldTotal = soldByItem[pl.raw_item_id] || 0;
+            // Calculate this line's share of sales: proportional to its purchased qty vs total purchased
+            const totalPurchasedForItem = (purchaseLines || []).filter(p => p.raw_item_id === pl.raw_item_id).reduce((sum, p) => sum + Number(p.qty), 0);
+            const soldShare = totalPurchasedForItem > 0 ? soldTotal * (Number(pl.qty) / totalPurchasedForItem) : 0;
+            const totalOut = consumed + soldShare;
             purchaseGroups[pid].lines.push({
                 item: pl.raw_items?.name,
                 uom: pl.raw_items?.uom,
                 purchased: Number(pl.qty),
-                consumed,
-                remaining: Math.max(0, Number(pl.qty) - consumed),
+                consumed: totalOut,
+                remaining: Math.max(0, Number(pl.qty) - totalOut),
             });
         });
 
