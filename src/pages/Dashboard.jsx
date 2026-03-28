@@ -315,55 +315,47 @@ export default function Dashboard() {
     );
   };
 
-  // Low stock items: balance < 20% of purchased for raw, balance < 20% of produced for FG
+  // Low stock items: evaluated independently — raw in their native UOM, FG in packets/bulk
   const getLowStockAlerts = () => {
-    const combinedMap = {};
+    const alerts = [];
 
-    // 1. Process Raw Materials
+    // 1. Raw Materials — alert when balance < 20% of total purchased
     rawByItem.forEach((r) => {
-      if (r.name && r.name !== '—') {
-        combinedMap[r.name.toLowerCase()] = {
+      if (!r.name || r.name === '—') return;
+      if (r.purchased <= 0) return;
+      const pct = (r.balance / r.purchased) * 100;
+      if (pct < 20) {
+        alerts.push({
           name: r.name,
           balance: r.balance,
           uom: r.uom,
-          purchased: r.purchased,
-        };
-      }
-    });
-
-    // 2. Process Finished Goods and merge if name matches
-    fgByItem.forEach((f) => {
-      if (f.name && f.name !== '(Unknown)') {
-        const key = f.name.toLowerCase();
-        
-        if (combinedMap[key]) {
-          combinedMap[key].balance += f.balance;
-          combinedMap[key].purchased += f.produced; 
-        } else {
-          combinedMap[key] = {
-            name: f.name,
-            balance: f.balance,
-            uom: f.uom || (f.isPacket ? 'pkts' : 'Kg'),
-            purchased: f.produced,
-          };
-        }
-      }
-    });
-
-    // 3. Filter for low stock (< 20% of combined purchased/produced)
-    const alerts = [];
-    Object.values(combinedMap).forEach(item => {
-      const pct = item.purchased > 0 ? (item.balance / item.purchased) * 100 : 0;
-      if (pct < 20) {
-        alerts.push({
-          ...item,
-          isCritical: pct < 10
+          isCritical: pct < 10,
         });
       }
     });
 
-    return alerts;
+    // 2. Finished Goods — each variant evaluated independently (never mixed with raw units)
+    fgByItem.forEach((f) => {
+      if (!f.name || f.name === '(Unknown)') return;
+      if (f.produced <= 0) return;
+      const pct = (f.balance / f.produced) * 100;
+      if (pct < 20) {
+        alerts.push({
+          name: `${f.name}${f.variant ? ` (${f.variant})` : ''}`,
+          balance: f.balance,
+          uom: f.isPacket ? 'pkts' : (f.uom || 'Kg'),
+          isCritical: pct < 10,
+        });
+      }
+    });
+
+    // Sort: critical first, then alphabetically
+    return alerts.sort((a, b) =>
+      (b.isCritical ? 1 : 0) - (a.isCritical ? 1 : 0) ||
+      a.name.localeCompare(b.name)
+    );
   };
+
 
   const lowStockCombined = getLowStockAlerts();
   const combinedStockView = getCombinedStockView();

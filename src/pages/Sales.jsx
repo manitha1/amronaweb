@@ -137,58 +137,100 @@ export default function Sales() {
   };
 
   // ── OPEN EDIT ──────────────────────────────────────────────────────────────
-  const openEditModal = (row) => {
+  const openEditModal = async (row) => {
     setEditingId(row.id);
     setBillNo(row.bill_no);
     setCustomerId(row.customer_id);
     setDate(row.date);
-    const parsedLines = (row.sales_lines || []).map((l) => {
-      const itype = l.item_type || "fg";
-      let size = l.packet_size || "";
-      let sUnit = "g";
-      if (size && size >= 1000 && size % 1000 === 0) {
-        size = size / 1000;
-        sUnit = "kg";
-      }
 
-      if (itype === "raw") {
+    // Parse lines — keep packet_size in grams so formatPacketSize() works correctly
+    const parsedLines = await Promise.all(
+      (row.sales_lines || []).map(async (l) => {
+        const itype = l.item_type || "fg";
+        // Keep packet_size as raw grams (do NOT convert to kg here).
+        // formatPacketSize(1000) → "1kg", formatPacketSize(500) → "500g"
+        const sizeGrams = l.packet_size ? Number(l.packet_size) : "";
+
+        if (itype === "raw") {
+          // For raw lines, add back this line's own qty so editing doesn't falsely block.
+          const rawBal = getRawBalance(l.raw_item_id);
+          const ownQty = l.raw_item_id ? Number(l.qty) : 0;
+          return {
+            id: l.id,
+            item_type: "raw",
+            raw_item_id: l.raw_item_id || "",
+            raw_item_name: l.raw_items?.name || "",
+            raw_sale_mode: l.packet_size ? "packets" : "bulk",
+            fg_item_id: "",
+            fg_item_name: "",
+            batch_id: "",
+            prod_line_id: l.production_line_id || "",
+            is_bulk: false,
+            packet_size: sizeGrams,
+            size_unit: "g",
+            qty: l.qty,
+            unit_price: l.unit_price,
+            availableQty: rawBal + ownQty,
+          };
+        }
+
+        // FG line: fetch total sold for this production_line, then add back
+        // this sale's own qty so the user isn't blocked re-saving the same qty.
+        let availableQty = null;
+        let isBulkBatch = false;
+        if (l.production_line_id) {
+          const batchLine = batches.find((b) => b.id === l.production_line_id);
+          if (batchLine) {
+            // Use THE BATCH's qty_per_packet to determine bulk — not the sales_line packet_size
+            isBulkBatch = !batchLine.qty_per_packet;
+
+            const { data: soldRows } = await supabase
+              .from("sales_lines")
+              .select("qty, packet_size")
+              .eq("production_line_id", l.production_line_id);
+
+            const totalSold = soldRows
+              ? soldRows.reduce((s, r) => {
+                  // For bulk batches: each sale deducted qty * packet_size grams
+                  // For packet batches: each sale deducted qty packets
+                  const v = isBulkBatch
+                    ? Number(r.qty) * (r.packet_size || 0)
+                    : Number(r.qty);
+                  return s + v;
+                }, 0)
+              : 0;
+
+            // Own committed qty using DB values (correct grams)
+            const ownConsumed = isBulkBatch
+              ? Number(l.qty) * (l.packet_size || 0)
+              : Number(l.qty);
+
+            const batchCapacity = Number(batchLine.total_qty);
+            availableQty = Math.max(0, batchCapacity - totalSold + ownConsumed);
+          }
+        }
+
         return {
           id: l.id,
-          item_type: "raw",
-          raw_item_id: l.raw_item_id || "",
-          raw_item_name: l.raw_items?.name || "",
-          raw_sale_mode: l.packet_size ? "packets" : "bulk",
-          fg_item_id: "",
-          fg_item_name: "",
-          batch_id: "",
-          prod_line_id: "",
-          is_bulk: false,
-          packet_size: size,
-          size_unit: sUnit,
+          item_type: "fg",
+          raw_item_id: "",
+          raw_item_name: "",
+          raw_sale_mode: "bulk",
+          batch_id: l.production_header_id || "",
+          prod_line_id: l.production_line_id || "",
+          fg_item_id: l.fg_item_id,
+          fg_item_name: l.fg_items?.name,
+          // is_bulk comes from the BATCH, not the sales_line
+          is_bulk: isBulkBatch,
+          packet_size: sizeGrams,
+          size_unit: "g",
           qty: l.qty,
           unit_price: l.unit_price,
-          availableQty: null,
+          availableQty,
         };
-      }
+      })
+    );
 
-      return {
-        id: l.id,
-        item_type: "fg",
-        raw_item_id: "",
-        raw_item_name: "",
-        raw_sale_mode: "bulk",
-        batch_id: l.production_header_id || "",
-        prod_line_id: "",
-        fg_item_id: l.fg_item_id,
-        fg_item_name: l.fg_items?.name,
-        is_bulk: !l.packet_size && !l.production_headers?.id,
-        packet_size: size,
-        size_unit: sUnit,
-        qty: l.qty,
-        unit_price: l.unit_price,
-        availableQty: null,
-      };
-    });
     setLines(parsedLines);
     setIsModalOpen(true);
   };
@@ -410,7 +452,8 @@ export default function Sales() {
         if (l.is_bulk && l.size_unit === "kg") pSize = pSize * 1000;
 
         const totalGramsNeeded = l.is_bulk ? Number(l.qty) * pSize : Number(l.qty);
-        if (totalGramsNeeded > l.availableQty) {
+        // Only block if we actually know the available qty (not null)
+        if (l.availableQty !== null && totalGramsNeeded > l.availableQty) {
           return toast.error(
             `Not enough stock for ${l.fg_item_name}. Needed: ${totalGramsNeeded}, Available: ${l.availableQty}`,
           );
@@ -441,7 +484,10 @@ export default function Sales() {
       }
 
       let pSize = l.packet_size ? Number(l.packet_size) : null;
-      if (l.is_bulk && l.size_unit === "kg" && pSize) pSize = pSize * 1000;
+      // Convert kg → g for ALL FG packet sizes (both bulk and regular packets).
+      // The edit modal may store 1000g as 1kg internally, so we must always
+      // normalise to grams before sending to the DB.
+      if (l.size_unit === "kg" && pSize) pSize = pSize * 1000;
 
       return {
         item_type: "fg",
@@ -839,7 +885,8 @@ export default function Sales() {
                             /* FG fixed packet size (read-only) or Raw bulk (N/A) */
                             <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
                               {line.item_type === "fg" && line.packet_size
-                                ? formatPacketSize(line.packet_size)
+                                // packet_size is stored in grams; formatPacketSize(1000) → "1kg"
+                                ? formatPacketSize(Number(line.packet_size))
                                 : "—"}
                             </span>
                           )}
@@ -891,7 +938,9 @@ export default function Sales() {
                                 {line.item_type === "raw"
                                   ? `In stock: ${line.availableQty} ${rawItems.find(r => r.id === line.raw_item_id)?.uom || ""}`
                                   : line.is_bulk
+                                    // Bulk: availableQty is in grams → format nicely
                                     ? `In stock: ${formatPacketSize(line.availableQty)}`
+                                    // Packets: availableQty is packet count
                                     : `In stock: ${line.availableQty} pkts`}
                                 {/* Needs label for raw packet mode — show in native UOM */}
                                 {line.item_type === "raw" &&
@@ -911,11 +960,8 @@ export default function Sales() {
                                   })()}
                                 {line.item_type === "fg" && line.is_bulk && line.packet_size && line.qty && (
                                   <span style={{ marginLeft: "4px", fontStyle: "italic", fontWeight: "normal" }}>
-                                    (Needs{" "}
-                                    {formatPacketSize(
-                                      Number(line.qty) * Number(line.packet_size),
-                                    )}
-                                    )
+                                    {/* packet_size in grams * qty → total grams */}
+                                    (Needs {formatPacketSize(Number(line.qty) * Number(line.packet_size))})
                                   </span>
                                 )}
                               </span>
