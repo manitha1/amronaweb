@@ -13,6 +13,7 @@ import Sales from './pages/Sales';
 import RawStockReport from './pages/RawStockReport';
 import FgStockReport from './pages/FgStockReport';
 import SummaryReport from './pages/SummaryReport';
+import MobileApp from './mobile/MobileApp';
 
 const rawItemColumns = [
     { key: 'code', label: 'Item Code' },
@@ -57,34 +58,45 @@ const TransactionModule = ({ title }) => <div className="page-header"><h2>{title
 
 function App() {
     return (
-        <AuthProvider>
-            <BrowserRouter>
-                <div className="app-container">
-                    <Routes>
-                        <Route path="/login" element={<Login />} />
+        <BrowserRouter>
+            {/* ── MOBILE SALES SUB-SITE (no desktop chrome) ── */}
+            <Routes>
+                <Route path="/mobile/*" element={<MobileApp />} />
 
-                        <Route path="/" element={<Layout />}>
-                            <Route index element={<Dashboard />} />
+                {/* ── DESKTOP APP ── */}
+                <Route
+                    path="/*"
+                    element={
+                        <AuthProvider>
+                            <div className="app-container">
+                                <Routes>
+                                    <Route path="/login" element={<Login />} />
 
-                            <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={rawItemColumns} formFields={rawItemFields} codeRange={{ min: 1000, max: 1999 }} />} />
-                            <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={fgItemColumns} formFields={fgItemFields} codeRange={{ min: 2000, max: 2999 }} />} />
-                            <Route path="suppliers" element={<MasterDataPage title="Suppliers" tableName="suppliers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 3000, max: 4000 }} />} />
-                            <Route path="customers" element={<MasterDataPage title="Customers" tableName="customers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 4001, max: 5000 }} />} />
+                                    <Route path="/" element={<Layout />}>
+                                        <Route index element={<Dashboard />} />
 
-                            <Route path="purchasing" element={<Purchasing />} />
-                            <Route path="production" element={<Production />} />
-                            <Route path="sales" element={<Sales />} />
-                            <Route path="raw-stock" element={<RawStockReport />} />
-                            <Route path="fg-stock" element={<FgStockReport />} />
-                            <Route path="summary" element={<SummaryReport />} />
-                        </Route>
+                                        <Route path="raw-items" element={<MasterDataPage title="Raw Items" tableName="raw_items" columns={rawItemColumns} formFields={rawItemFields} codeRange={{ min: 1000, max: 1999 }} />} />
+                                        <Route path="fg-items" element={<MasterDataPage title="Finished Goods" tableName="fg_items" columns={fgItemColumns} formFields={fgItemFields} codeRange={{ min: 2000, max: 2999 }} />} />
+                                        <Route path="suppliers" element={<MasterDataPage title="Suppliers" tableName="suppliers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 3000, max: 4000 }} />} />
+                                        <Route path="customers" element={<MasterDataPage title="Customers" tableName="customers" columns={contactColumns} formFields={contactFields} codeRange={{ min: 4001, max: 5000 }} />} />
 
-                        <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                </div>
-                <Toaster position="top-right" />
-            </BrowserRouter>
-        </AuthProvider>
+                                        <Route path="purchasing" element={<Purchasing />} />
+                                        <Route path="production" element={<Production />} />
+                                        <Route path="sales" element={<Sales />} />
+                                        <Route path="raw-stock" element={<RawStockReport />} />
+                                        <Route path="fg-stock" element={<FgStockReport />} />
+                                        <Route path="summary" element={<SummaryReport />} />
+                                    </Route>
+
+                                    <Route path="*" element={<Navigate to="/" replace />} />
+                                </Routes>
+                            </div>
+                            <Toaster position="top-right" />
+                        </AuthProvider>
+                    }
+                />
+            </Routes>
+        </BrowserRouter>
     );
 }
 
